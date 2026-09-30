@@ -403,6 +403,71 @@ describe("EXECUTOR_TRAINING_KWARGS", () => {
       EXECUTOR_TRAINING_KWARGS.KILL_AFTER_SEC,
     );
   });
+
+  // Gate 0 measured these on an RTX 4060 Ti. They are the reason the bounds are
+  // loose: tightening any of them back toward the training budget makes every
+  // experiment on a consumer GPU fail or get killed, which is silent and looks
+  // like a broken framework rather than a wrong constant.
+  const GATE_0 = {
+    trainingSeconds: 311.5,
+    totalSeconds: 672.0,
+    wallClockSeconds: 676.6,
+    numSteps: 32,
+    peakVramMb: 2985.3,
+    mfuPercent: 10.01,
+  };
+
+  it("accepts the measured training_seconds overshoot", () => {
+    expect(GATE_0.trainingSeconds).toBeLessThanOrEqual(EXECUTOR_TRAINING_KWARGS.MAX_TRAINING_SECONDS);
+  });
+
+  it("does not kill a run that legitimately took the measured wall clock", () => {
+    expect(GATE_0.wallClockSeconds).toBeLessThan(EXECUTOR_TRAINING_KWARGS.KILL_AFTER_SEC);
+  });
+
+  it("clears the kill timeout for the training budget alone", () => {
+    expect(EXECUTOR_TRAINING_KWARGS.KILL_AFTER_SEC).toBeGreaterThan(
+      EXECUTOR_TRAINING_KWARGS.TIME_BUDGET_SEC,
+    );
+  });
+
+  it("parses and validates the real Gate 0 baseline run end to end", () => {
+    // A genuine 11-minute consumer-GPU run, transcribed from the Gate 0 log.
+    const block = [
+      "---",
+      "val_bpb:          1.024859",
+      "training_seconds: 311.5",
+      "total_seconds:    672.0",
+      "peak_vram_mb:     2985.3",
+      "mfu_percent:      10.01",
+      "total_tokens_M:   16.8",
+      "num_steps:        32",
+      "num_params_M:     50.3",
+      "depth:            8",
+      "dataset:          tinystories",
+      "train_batch_size: 8",
+      "eval_batch_size:  8",
+      "activation_checkpointing: enabled",
+    ].join("\n");
+
+    const parsed = parseAndValidateTrainingSummary(logOf(block), {
+      gpuTotalVramBytes: 16380 * 1024 * 1024,
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    expect(parsed.metrics.valBpb).toBeCloseTo(1.024859, 6);
+    expect(parsed.metrics.numSteps).toBe(GATE_0.numSteps);
+    expect(parsed.metrics.mfuPercent).toBeCloseTo(GATE_0.mfuPercent, 2);
+
+    // Evaluation cost more than training here, so preflight must be small and
+    // evalSeconds must dominate. This is the split that explains why the kill
+    // timeout cannot track the training budget.
+    const timing = deriveTiming(parsed.metrics, GATE_0.wallClockSeconds);
+    expect(timing.preflightSeconds).toBeCloseTo(4.6, 1);
+    expect(timing.evalSeconds).toBeCloseTo(360.5, 1);
+    expect(timing.evalSeconds).toBeGreaterThan(parsed.metrics.trainingSeconds);
+  });
 });
 
 describe("parseAndValidateTrainingSummary", () => {

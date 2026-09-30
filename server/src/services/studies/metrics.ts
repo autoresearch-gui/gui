@@ -3,11 +3,27 @@ import { renameSync, writeFileSync } from "node:fs";
 /**
  * Ground truth pinned from the executor side of the autoresearch contract.
  *
- * These values are not tuning knobs. `TIME_BUDGET_SEC` mirrors the read-only
- * `TIME_BUDGET` constant that `prepare.py` is allowed to import but not change,
- * and `TOTAL_BATCH_SIZE` mirrors `TOTAL_BATCH_SIZE = 2 ** 19` in the executor's
- * `train.py`. Both are asserted against the produced log so that an agent which
- * edits the framework instead of the model cannot buy itself a "win".
+ * `TIME_BUDGET_SEC` mirrors the read-only `TIME_BUDGET` constant that
+ * `prepare.py` may import but not change, and `TOTAL_BATCH_SIZE` mirrors
+ * `TOTAL_BATCH_SIZE = 2 ** 19` in the executor's `train.py`. Both are asserted
+ * against the produced log so that an agent which edits the framework instead of
+ * the model cannot buy itself a "win".
+ *
+ * The wall-clock figures below are measured, not guessed. Gate 0 on an RTX 4060
+ * Ti (16 GB) produced this baseline run:
+ *
+ *   val_bpb 1.024859 | training_seconds 311.5 | total_seconds 672.0
+ *   num_steps 32 | mfu 10.01 | peak_vram_mb 2985.3 | wall clock 676.6s
+ *
+ * Two things that run disproved. First, evaluation over the full
+ * `EVAL_TOKENS = 40 * 2 ** 19` costs ~360s, which is longer than the 300s of
+ * training, so a whole experiment is ~11 minutes rather than the ~5.5 the
+ * upstream README implies. Second, the upstream "kill past 10 minutes" rule was
+ * written for a much faster GPU and would have discarded this run outright.
+ *
+ * These constants are therefore deliberately generous. The plausibility gate
+ * exists to catch a fabricated or truncated metrics block, not to police benign
+ * overshoot, so a bound that rejects a real run is worse than a loose bound.
  */
 export const EXECUTOR_TRAINING_KWARGS = {
   /** Read-only time budget the executor trains under. */
@@ -15,23 +31,42 @@ export const EXECUTOR_TRAINING_KWARGS = {
   /** Tokens per optimizer step: 2 ** 19. Used for the internal-consistency check. */
   TOTAL_BATCH_SIZE: 524288,
   /**
-   * The executor breaks only at a step boundary once the budget is spent, so a
-   * genuine full run lands at or just above 300s. The lower bound absorbs slow
-   * first-step autograd/kernel-compile cost; the upper bound catches a run that
-   * kept going long after the budget was gone.
+   * The executor breaks only at a step boundary once the budget is spent. On a
+   * consumer GPU a single step is ~15s, so a genuine full run overshoots by up
+   * to a full step: the measured baseline landed at 311.5s. The lower bound
+   * absorbs first-step autograd and kernel-compile cost. The upper bound is
+   * loose on purpose - it catches a run that kept going long after the budget
+   * was gone, not a few seconds of overshoot.
    */
   MIN_TRAINING_SECONDS: 270,
-  MAX_TRAINING_SECONDS: 310,
+  MAX_TRAINING_SECONDS: 480,
   /** Relative tolerance for `total_tokens_M` vs `num_steps * TOTAL_BATCH_SIZE`. */
   TOKEN_CONSISTENCY_TOLERANCE: 0.01,
   VAL_BPB_PLAUSIBLE_MIN: 0.5,
   VAL_BPB_PLAUSIBLE_MAX: 3.0,
-  /** A real 300s run completes hundreds of steps; single digits means it bailed. */
+  /**
+   * Step count is the slowest-moving plausibility signal. A 300s run on a fast
+   * datacenter GPU completes hundreds of steps; the measured consumer-GPU
+   * baseline completed 32, because throughput was ~36k tok/s against the
+   * README's 1.66M. Anything at or below 10 also forces `mfu_percent` to `n/a`,
+   * since `steady_state_steps` is `max(num_steps - 10, 0)`.
+   */
   MIN_NUM_STEPS: 11,
-  /** Hard kill for the training subprocess. */
-  KILL_AFTER_SEC: 600,
-  /** Adapter-level timeout. Must exceed KILL_AFTER_SEC so the kill wins first. */
-  ADAPTER_TIMEOUT_SEC: 660,
+  /**
+   * Hard kill for the training subprocess, measured from spawn. This must clear
+   * the training budget, evaluation, and interpreter startup together, because
+   * the budget deliberately excludes all three. Three times the training budget
+   * leaves room for the ~360s eval the consumer-GPU baseline showed. Treat it as
+   * per-machine: the study stores its own value and the leaderboard surfaces the
+   * observed wall clock so an operator can tune it.
+   */
+  KILL_AFTER_SEC: 900,
+  /**
+   * Adapter-level timeout on the executor process. Must exceed KILL_AFTER_SEC so
+   * the executor's own kill wins first, leaving this much headroom for the log
+   * flush, the parse, and the atomic metrics write.
+   */
+  ADAPTER_TIMEOUT_SEC: 960,
 } as const;
 
 export interface ParsedTrainingMetrics {

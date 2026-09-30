@@ -22,14 +22,16 @@ export const createStudySchema = z.object({
   cacheDir: z.string().trim().max(400).optional().nullable(),
   timeBudgetSec: z.number().int().min(60).max(86_400).optional().default(300),
   /**
-   * Hard wall-clock kill for a training run. 600s is the upstream autoresearch
-   * rule ("if a run exceeds 10 minutes, kill it and treat it as a failure"). It
-   * must clear `timeBudgetSec` plus interpreter startup, runtime detection,
-   * tokenizer load, the autotune pass, and evaluation, because the training
-   * budget deliberately excludes all of those. A cold baseline on a 10 GB card
-   * reaches roughly 440s, so a value near `timeBudgetSec` would kill valid runs.
+   * Hard wall-clock kill for a training run, measured from spawn.
+   *
+   * 900s is the Gate 0 measurement on an RTX 4060 Ti: training ran 311.5s and
+   * evaluation over the full `EVAL_TOKENS` added ~360s more, for 676.6s of wall
+   * clock. The budget is training-only and excludes startup, runtime detection,
+   * tokenizer load, and evaluation, so this has to clear all of it. The
+   * upstream autoresearch "kill past 10 minutes" rule assumed a far faster GPU
+   * and would discard a legitimate run here.
    */
-  killAfterSec: z.number().int().min(60).max(86_400).optional().default(600),
+  killAfterSec: z.number().int().min(60).max(86_400).optional().default(900),
   isBaselineRequired: z.boolean().optional().default(true),
   baselineValBpb: z.number().finite().optional().nullable(),
   baselineGitSha: z.string().trim().max(64).optional().nullable(),
