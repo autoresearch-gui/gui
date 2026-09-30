@@ -150,6 +150,7 @@ import {
   documentAnnotationThreads,
   documentRevisions,
   environmentLeases,
+  experiments,
   issueDocuments,
   executionWorkspaces,
   heartbeatRunEvents,
@@ -328,6 +329,7 @@ import {
 import { reportRunFailure } from "./run-failure-report.js";
 import { collectRunFailureSecretValues, type RunFailureReportOptions } from "./run-failure-diagnostics.js";
 import { companySkillService } from "./company-skills.js";
+import { experimentsService } from "./studies/experiments.js";
 import { budgetService, type BudgetEnforcementScope } from "./budgets.js";
 import { secretService, type MissingRuntimeBinding } from "./secrets.js";
 import {
@@ -10051,6 +10053,7 @@ export function heartbeatService(
   }
 
   const taskWatchdogs = taskWatchdogService(db, { enqueueWakeup });
+  const studiesExperiments = experimentsService(db);
   let unsafeTextProjectionPromise: Promise<boolean> | null = null;
 
   async function completeSkillTestRunForHeartbeatOutcome(input: {
@@ -10134,6 +10137,85 @@ export function heartbeatService(
     });
 
     return completedRun;
+  }
+
+  /**
+   * Settles the autoresearch experiment this run executed, if it was one.
+   *
+   * Deliberately NOT keyed off `issue.harnessKind`. Setting `harness_kind` makes
+   * `harness_kind IS NOT NULL` true, and that predicate is used in twenty places
+   * to hide an issue from trees, search, and the board — including in
+   * `services/costs.ts`, which drops such issues from per-issue cost rollups.
+   * An experiment whose GPU cost silently stops reconciling against company spend
+   * is worse than a visible one, so the experiment is identified by
+   * `experiments.heartbeatRunId` instead.
+   *
+   * The `succeeded` case is the interesting one and is why this is a separate
+   * resolver rather than a branch on the skill-test one: that resolver returns
+   * null for success because a skill test only cares about failures. A training
+   * run that worked is precisely the event worth recording.
+   */
+  async function settleResearchExperimentForHeartbeatOutcome(input: {
+    run: typeof heartbeatRuns.$inferSelect;
+    outcome: RunSessionOutcome;
+    error: string | null;
+  }) {
+    const experiment = await db
+      .select({ id: experiments.id, studyId: experiments.studyId })
+      .from(experiments)
+      .where(
+        and(
+          eq(experiments.companyId, input.run.companyId),
+          eq(experiments.heartbeatRunId, input.run.id),
+        ),
+      )
+      .then((rows) => rows[0] ?? null);
+    if (!experiment) return null;
+
+    // A cancelled, interrupted, or timed-out run produced no metric, so it settles as a crash
+    // rather than a discard: the executor never reached a verdict, and the distinction the
+    // ledger cares about is "no number came back".
+    const settleOutcome =
+      input.outcome === "succeeded"
+        ? "succeeded"
+        : input.outcome === "timed_out"
+          ? "timed_out"
+          : input.outcome === "cancelled" || input.outcome === "interrupted"
+            ? "cancelled"
+            : "failed";
+    const settled = await studiesExperiments.settleFromRun({
+      companyId: input.run.companyId,
+      studyId: experiment.studyId,
+      runId: input.run.id,
+      outcome: settleOutcome,
+      error: input.error,
+      actor: {
+        actorType: "system",
+        actorId: "heartbeat_finalize",
+      },
+    });
+    if (!settled.settled) return null;
+
+    await logActivity(db, {
+      companyId: input.run.companyId,
+      actorType: "system",
+      actorId: "heartbeat_finalize",
+      agentId: input.run.agentId,
+      runId: input.run.id,
+      action: "study.experiment_settled",
+      entityType: "experiment",
+      entityId: settled.experiment?.id ?? experiment.id,
+      details: {
+        studyId: experiment.studyId,
+        heartbeatOutcome: input.outcome,
+        status: settled.experiment?.status ?? null,
+        valBpb: settled.experiment?.valBpb ?? null,
+        metricsRejection: settled.metricsRejection ?? null,
+        source: "heartbeat.run_finalized",
+      },
+    });
+
+    return settled.experiment;
   }
 
   async function releaseEnvironmentLeasesForRun(input: {
@@ -25297,6 +25379,21 @@ export function heartbeatService(
               `[paperclip] Failed to complete skill test run: ${err instanceof Error ? err.message : String(err)}\n`,
             );
           }
+          // Settle the autoresearch experiment this run executed, if any. Kept in its own
+          // try/catch: a failure here must not disturb run finalization or liveness, and the
+          // orchestrator's orphan reconciliation is the backstop if a settle is ever lost.
+          try {
+            await settleResearchExperimentForHeartbeatOutcome({
+              run: finalizedRun,
+              outcome,
+              error: runErrorMessage,
+            });
+          } catch (err) {
+            logger.warn(
+              { err, runId: finalizedRun.id },
+              "failed to settle study experiment after heartbeat finalization",
+            );
+          }
           const livenessRun = finalizedRun;
           await refreshContinuationSummaryForRun(livenessRun, agent);
           const skipRunIssueComment =
@@ -25889,6 +25986,21 @@ export function heartbeatService(
               "failed to complete skill test run after heartbeat adapter failure",
             );
           }
+          // An adapter failure means the executor never reached a metric, so the experiment
+          // settles as a crash and the branch resets. Leaving it running would wedge the
+          // study behind the single-running-experiment index until orphan reconciliation.
+          try {
+            await settleResearchExperimentForHeartbeatOutcome({
+              run: livenessRun,
+              outcome: "failed",
+              error: message,
+            });
+          } catch (err) {
+            logger.warn(
+              { err, runId: livenessRun.id },
+              "failed to settle study experiment after heartbeat adapter failure",
+            );
+          }
           await refreshContinuationSummaryForRun(livenessRun, agent);
           if (
             !isWorkspaceValidationFailedRun(livenessRun) &&
@@ -26145,6 +26257,19 @@ export function heartbeatService(
               );
             });
           }
+          // Setup never reached the executor, so there is no metrics file and no run to
+          // attribute the failure to beyond this one. Settle only when this run is the one
+          // that owns an experiment; the lookup inside the hook makes that a no-op otherwise.
+          await settleResearchExperimentForHeartbeatOutcome({
+            run: livenessRun,
+            outcome: "failed",
+            error: message,
+          }).catch((settleErr) => {
+            logger.warn(
+              { err: settleErr, runId: livenessRun.id },
+              "failed to settle study experiment after heartbeat setup failure",
+            );
+          });
           const failedAgent =
             setupFailureAgent ??
             (await getAgent(run.agentId).catch(() => null));
