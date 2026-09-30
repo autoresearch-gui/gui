@@ -24,52 +24,128 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
-
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Check forbidden tokens
-        run: pnpm check:tokens
-
-      - name: Check UI token gates
-        run: pnpm check:token-gates
-
-      - name: Check module boundaries
-        run: pnpm check:module-boundaries
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:tokens
+      - run: pnpm check:token-gates
+      - run: pnpm check:module-boundaries
 
   verify:
-    name: Typecheck, test, and build
+    name: Typecheck and build
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
-
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r typecheck
+      - run: pnpm build
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+  # The server suite has ~870 test files and boots an embedded Postgres per file
+  # with maxWorkers=1, so it cannot finish on a single runner. run-vitest-stable
+  # balances shard boundaries from the checked-in duration tables.
+  #
+  # Only these four groups accept --shard-index/--shard-count; passing the flags
+  # to any other group is a hard error, so they get their own job below.
+  test-general-sharded:
+    name: General ${{ matrix.group }} shard ${{ matrix.shardIndex }}/${{ matrix.shardCount }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { group: general-server, shardCount: 4, shardIndex: 0 }
+          - { group: general-server, shardCount: 4, shardIndex: 1 }
+          - { group: general-server, shardCount: 4, shardIndex: 2 }
+          - { group: general-server, shardCount: 4, shardIndex: 3 }
+          - { group: general-server-without-chat, shardCount: 2, shardIndex: 0 }
+          - { group: general-server-without-chat, shardCount: 2, shardIndex: 1 }
+          - { group: general-chat, shardCount: 1, shardIndex: 0 }
+          - { group: general-workspaces-a, shardCount: 1, shardIndex: 0 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run preflight:workspace-links
+      - run: pnpm --filter @paperclipai/plugin-sdk ensure-build-deps
+      - name: Run group shard
+        run: >-
+          node scripts/run-vitest-stable.mjs
+          --mode general
+          --group ${{ matrix.group }}
+          --shard-index ${{ matrix.shardIndex }}
+          --shard-count ${{ matrix.shardCount }}
 
-      - name: Typecheck
-        run: pnpm -r typecheck
+  test-general-unsharded:
+    name: General ${{ matrix.group }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        group:
+          - general-workspaces-b
+          - general-server-native-runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run preflight:workspace-links
+      - run: pnpm --filter @paperclipai/plugin-sdk ensure-build-deps
+      - name: Run group
+        run: node scripts/run-vitest-stable.mjs --mode general --group ${{ matrix.group }}
 
-      - name: Test
-        run: pnpm test:run
-
-      - name: Build
-        run: pnpm build
+  test-serialized:
+    name: Serialized suites shard ${{ matrix.shardIndex }}/${{ matrix.shardCount }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { shardCount: 3, shardIndex: 0 }
+          - { shardCount: 3, shardIndex: 1 }
+          - { shardCount: 3, shardIndex: 2 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run preflight:workspace-links
+      - run: pnpm --filter @paperclipai/plugin-sdk ensure-build-deps
+      - name: Run serialized mode
+        run: >-
+          node scripts/run-vitest-stable.mjs
+          --mode serialized
+          --shard-index ${{ matrix.shardIndex }}
+          --shard-count ${{ matrix.shardCount }}

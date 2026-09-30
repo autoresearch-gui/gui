@@ -169,6 +169,21 @@ Run the browser suites only when your change touches them or when you are explic
 
 For normal issue work, run the smallest relevant verification first. Do not default to repo-wide typecheck/build/test on every heartbeat when a narrower check is enough to prove the change.
 
+### Running the full suite locally
+
+`pnpm test:run` is not practical on a developer workstation and should be left to
+CI. The server suite has roughly 870 test files, each of which boots its own
+embedded Postgres, and `server/vitest.config.ts` pins `maxWorkers: 1`. That works
+out to hours of wall clock on one machine. `scripts/run-vitest-stable.mjs` already
+supports `--shard-index` / `--shard-count`, and `.github/workflows/ci.yml` fans the
+suite out across runners.
+
+Prefer a targeted run while iterating:
+
+```sh
+pnpm exec vitest run server/src/services/studies/
+```
+
 Run this full check before claiming repo work done in a PR-ready hand-off, or when the change scope is broad enough that targeted checks are not sufficient:
 
 ```sh
@@ -177,7 +192,9 @@ pnpm test:run
 pnpm build
 ```
 
-If anything cannot be run, explicitly report what was not run and why.
+If anything cannot be run, explicitly report what was not run and why. On a
+workstation, that normally means reporting that the full `pnpm test:run` was left
+to CI and naming the targeted suites that were run instead.
 
 ## 8. API and Auth Expectations
 

@@ -104,11 +104,17 @@ function isAllowlisted(relPath, allowlist) {
 }
 
 // ── File walking ─────────────────────────────────────────────────────────
+// Tests and stories are excluded. The gate exists to keep production styling on
+// tokens; a test fixture legitimately holds arbitrary runtime data such as a
+// catalog brand hex supplied at runtime. `check-module-boundaries.mjs` scopes
+// itself the same way.
+const TEST_FILE_RE = /\.(?:test|spec|stories)\.[jt]sx?$/;
+
 function walk(dir, out) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, entry.name);
     if (entry.isDirectory()) walk(p, out);
-    else if (/\.(tsx?|jsx?)$/.test(entry.name)) out.push(p);
+    else if (/\.(tsx?|jsx?)$/.test(entry.name) && !TEST_FILE_RE.test(entry.name)) out.push(p);
   }
 }
 
