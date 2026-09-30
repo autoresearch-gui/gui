@@ -19,6 +19,7 @@ import {
   isPaperclipExternalChatContractTurn,
   isPaperclipExternalChatQuestionResponseTurn,
   isPaperclipExternalChatTurn,
+  isAbortError,
   materializePaperclipSkillCopy,
   PAPERCLIP_OPERATIONAL_SKILL_KEY,
   refreshPaperclipWorkspaceEnvForExecution,
@@ -584,6 +585,71 @@ describe("runChildProcess", () => {
     expect(result.exitCode).toBe(0);
     expect(result.timedOut).toBe(false);
     expect(result.stdout).toBe("done");
+  });
+
+  it("settles an aborted signal as a result instead of a rejection", async () => {
+    const controller = new AbortController();
+    const runId = randomUUID();
+    const resultPromise = runChildProcess(
+      runId,
+      process.execPath,
+      ["-e", "process.stdout.write(String(process.pid));setInterval(() => {}, 1000);"],
+      {
+        cwd: process.cwd(),
+        env: {},
+        // No timeout: the abort is the only thing that can end this child, so
+        // the test fails by hanging if the signal never reaches spawn.
+        timeoutSec: 0,
+        graceSec: 1,
+        onLog: async () => {},
+        signal: controller.signal,
+      },
+    );
+    // Abort from a later tick, the way operator Stop does. An abort raised
+    // synchronously inside onSpawn would reach spawn() before the child error
+    // handler is attached, and EventEmitter would rethrow it unhandled.
+    setTimeout(() => controller.abort(new Error("run cancelled")), 150);
+
+    const result = await resultPromise;
+
+    expect(result.aborted).toBe(true);
+    expect(result.timedOut).toBe(false);
+    expect(result.exitCode).toBeNull();
+    // The run must not stay tracked once its child is cancelled, or the
+    // reaper would keep treating it as owned.
+    expect(runningProcesses.has(runId)).toBe(false);
+    const childPid = Number.parseInt(result.stdout.trim(), 10);
+    expect(Number.isInteger(childPid) && childPid > 0).toBe(true);
+    expect(await waitForPidExit(childPid, 5_000)).toBe(true);
+  });
+
+  it("leaves the child running when the signal never aborts", async () => {
+    const controller = new AbortController();
+    const result = await runChildProcess(
+      randomUUID(),
+      process.execPath,
+      ["-e", "process.stdout.write('done');"],
+      {
+        cwd: process.cwd(),
+        env: {},
+        timeoutSec: 5,
+        graceSec: 1,
+        onLog: async () => {},
+        signal: controller.signal,
+      },
+    );
+
+    expect(result.aborted).toBe(false);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("done");
+  });
+
+  it("distinguishes an abort from a real spawn failure", () => {
+    expect(isAbortError(Object.assign(new Error("aborted"), { name: "AbortError" }))).toBe(true);
+    expect(isAbortError(Object.assign(new Error("aborted"), { code: "ABORT_ERR" }))).toBe(true);
+    expect(isAbortError(Object.assign(new Error("missing"), { code: "ENOENT" }))).toBe(false);
+    expect(isAbortError(new Error("other"))).toBe(false);
+    expect(isAbortError(null)).toBe(false);
   });
 
   it("waits for onSpawn before sending stdin to the child", async () => {

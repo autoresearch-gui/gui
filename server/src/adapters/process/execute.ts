@@ -22,9 +22,15 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const args = asStringArray(config.args);
   const cwd = asString(config.cwd, process.cwd());
   const envConfig = parseObject(config.env);
+  // One gate for every live credential this adapter can hand to the child: the
+  // run-scoped agent JWT (PAPERCLIP_API_KEY) and the runtime-tools bearer token
+  // plus its endpoint (PAPERCLIP_RUNTIME_TOOLS_*). Both are company-scoped
+  // write access, which an executor running agent-written code must not hold.
+  // Absent means enabled so every existing agent keeps today's behaviour.
+  const injectApiKey = config.injectApiKey !== false;
   const env: Record<string, string> = {
     ...buildPaperclipEnv(agent),
-    ...buildRuntimeToolsEnv(ctx.runtimeTools),
+    ...(injectApiKey ? buildRuntimeToolsEnv(ctx.runtimeTools) : {}),
   };
   for (const [k, v] of Object.entries(envConfig)) {
     if (typeof v !== "string") continue;
@@ -36,7 +42,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     env[k] = v;
   }
   env.PAPERCLIP_RUN_ID = runId;
-  if (authToken) env.PAPERCLIP_API_KEY = authToken;
+  if (authToken && injectApiKey) env.PAPERCLIP_API_KEY = authToken;
   // runtimeEnv is only used to resolve the command path and log HOME below;
   // the child env is built inside runChildProcess from
   // sanitizeInheritedPaperclipEnv(process.env) + env, so a PAPERCLIP_API_KEY
@@ -69,6 +75,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     graceSec,
     onLog,
     onSpawn: ctx.onSpawn,
+    // Operator Stop, agent cancellation, and the budget hard-stop all abort
+    // this run-scoped signal. Without it only timeoutSec can end a child, so a
+    // cancelled run would keep its process (and its GPU) busy.
+    signal: ctx.signal,
   });
 
   if (proc.timedOut) {
@@ -77,6 +87,23 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       signal: proc.signal,
       timedOut: true,
       errorMessage: `Timed out after ${timeoutSec}s`,
+    };
+  }
+
+  if (proc.aborted) {
+    // The server decides the run outcome from the same aborted signal, so
+    // report the stop instead of a misleading exit code. Settling here also
+    // keeps a cancelled run row from stranding on a thrown adapter error.
+    return {
+      exitCode: proc.exitCode,
+      signal: proc.signal,
+      timedOut: false,
+      errorMessage: "Run cancelled before the process finished",
+      resultJson: {
+        stdout: proc.stdout,
+        stderr: proc.stderr,
+        aborted: true,
+      },
     };
   }
 

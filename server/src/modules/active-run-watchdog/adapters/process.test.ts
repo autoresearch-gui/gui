@@ -22,7 +22,7 @@ describe("adapters", () => {
       runningProcesses.clear();
     });
 
-    it("reports skipped_non_local_adapter for a non-sessioned adapter type", async () => {
+    it("reports skipped_non_local_adapter for a non-local adapter type", async () => {
       const adapter = createProcessAdapter();
 
       const outcome = await adapter.cleanupRunProcess({
@@ -34,6 +34,54 @@ describe("adapters", () => {
 
       expect(outcome).toEqual({ attempted: false, outcome: "skipped_non_local_adapter", adapterType: "hermes_gateway" });
       expect(mockedIsPidAlive).not.toHaveBeenCalled();
+    });
+
+    it("reaps a live process-adapter child", async () => {
+      mockedIsPidAlive.mockReturnValueOnce(true).mockReturnValueOnce(false);
+      mockedIsProcessGroupAlive.mockReturnValue(false);
+      mockedTerminateLocalService.mockResolvedValue(undefined);
+      const adapter = createProcessAdapter();
+
+      const outcome = await adapter.cleanupRunProcess({
+        runId: "run-1",
+        adapterType: "process",
+        fallbackPid: 4242,
+        fallbackProcessGroupId: null,
+      });
+
+      expect(outcome).toEqual({
+        attempted: true,
+        outcome: "terminated",
+        adapterType: "process",
+        pid: 4242,
+        processGroupId: null,
+      });
+      expect(mockedTerminateLocalService).toHaveBeenCalledTimes(1);
+    });
+
+    it("prefers the registered process-adapter child over the persisted pid", async () => {
+      mockedIsPidAlive.mockReturnValueOnce(true).mockReturnValueOnce(false);
+      mockedIsProcessGroupAlive.mockReturnValue(false);
+      mockedTerminateLocalService.mockResolvedValue(undefined);
+      runningProcesses.set("run-1", {
+        child: { pid: 5150 } as never,
+        graceSec: 3,
+        processGroupId: null,
+      });
+      const adapter = createProcessAdapter();
+
+      const outcome = await adapter.cleanupRunProcess({
+        runId: "run-1",
+        adapterType: "process",
+        fallbackPid: 4242,
+        fallbackProcessGroupId: null,
+      });
+
+      expect(outcome).toMatchObject({ attempted: true, pid: 5150 });
+      expect(mockedTerminateLocalService).toHaveBeenCalledWith(
+        { pid: 5150, processGroupId: null },
+        { forceAfterMs: 3000 },
+      );
     });
 
     it("reports no_process_metadata when no pid or process group is known", async () => {

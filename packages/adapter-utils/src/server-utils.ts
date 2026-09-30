@@ -62,6 +62,14 @@ export interface RunProcessResult {
   // run-disposition seam sets it to `duplex_channel_lost` when the sandbox
   // duplex control channel died before a clean completion.
   errorCode?: string | null;
+  // True when the caller's AbortSignal stopped the child, as opposed to a
+  // timeout or the child ending on its own. It follows the same
+  // additive-optional convention as the timing fields: a producer that never
+  // receives a signal leaves it absent, so the existing `RunProcessResult`
+  // producers stay unchanged. A signal abort settles as this result rather
+  // than a rejection, because the caller awaits the run and a throw would
+  // strand a run row the cancellation already stopped.
+  aborted?: boolean;
   terminalResultCleanup?: TerminalResultCleanupEvidence | null;
 }
 
@@ -141,6 +149,18 @@ export function signalRunningProcess(
   if (running.child.exitCode === null && running.child.signalCode === null) {
     running.child.kill(signal);
   }
+}
+
+/**
+ * Recognizes the abort that `spawn({ signal })` reports on the child process.
+ * Node's `AbortError` carries both a name and an `ABORT_ERR` code; either one
+ * identifies it, and neither can be produced by a real spawn failure such as
+ * ENOENT, so a match stays specific to run cancellation.
+ */
+export function isAbortError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const candidate = err as { name?: unknown; code?: unknown };
+  return candidate.name === "AbortError" || candidate.code === "ABORT_ERR";
 }
 
 export const runningProcesses = new Map<string, RunningProcess>();
@@ -4696,6 +4716,7 @@ export async function runChildProcess(
     }) => Promise<void>;
     terminalResultCleanup?: TerminalResultCleanupOptions;
     stdin?: string;
+    signal?: AbortSignal;
     remoteExecution?: RemoteExecutionSpec | null;
     localProcessSandbox?: LocalProcessSandboxOptions | null;
   },
@@ -4744,6 +4765,11 @@ export async function runChildProcess(
           detached: process.platform !== "win32",
           shell: false,
           stdio: [opts.stdin != null ? "pipe" : "ignore", "pipe", "pipe"],
+          // Node kills the child and emits an AbortError on the child when the
+          // signal aborts, so run cancellation reaches a caller that never
+          // armed timeoutSec. The AbortError is turned into a settled result in
+          // the error handler below rather than a rejection.
+          signal: opts.signal,
         }) as ChildProcessWithEvents;
         const startedAt = new Date().toISOString();
         const processGroupId = resolveProcessGroupId(child);
@@ -4768,6 +4794,7 @@ export async function runChildProcess(
         });
 
         let timedOut = false;
+        let aborted = false;
         let stdout = "";
         let stderr = "";
         let logChain: Promise<void> = Promise.resolve();
@@ -4777,6 +4804,7 @@ export async function runChildProcess(
         let terminalCleanupForceKilled = false;
         let terminalCleanupTimer: NodeJS.Timeout | null = null;
         let terminalCleanupKillTimer: NodeJS.Timeout | null = null;
+        let abortEscalationTimer: NodeJS.Timeout | null = null;
         let terminalResultStdoutScanOffset = 0;
         let terminalResultStderrScanOffset = 0;
 
@@ -4909,6 +4937,39 @@ export async function runChildProcess(
           if (timeout) clearTimeout(timeout);
           clearTerminalCleanupTimers();
           runningProcesses.delete(runId);
+          if (isAbortError(err)) {
+            // spawn() reports a signal abort as an AbortError on the child, so
+            // an aborted run has to settle as a result rather than a rejection:
+            // the caller awaits this promise, and a throw would strand the run
+            // row that the cancellation already stopped. Mirror the close path,
+            // which drains the log chain before resolving.
+            aborted = true;
+            abortEscalationTimer = setTimeout(
+              () => {
+                abortEscalationTimer = null;
+                signalRunningProcess({ child, processGroupId }, "SIGKILL");
+              },
+              Math.max(1, opts.graceSec) * 1000,
+            );
+            void logChain.finally(() => {
+              void Promise.resolve()
+                .then(() => target.cleanup?.())
+                .finally(() => {
+                  resolve({
+                    exitCode: null,
+                    signal: null,
+                    timedOut,
+                    aborted: true,
+                    stdout,
+                    stderr,
+                    pid: child.pid ?? null,
+                    startedAt,
+                  });
+                });
+            });
+            return;
+          }
+          if (abortEscalationTimer) clearTimeout(abortEscalationTimer);
           void target.cleanup?.();
           const errno = (err as NodeJS.ErrnoException).code;
           const pathValue = mergedEnv.PATH ?? mergedEnv.Path ?? "";
@@ -4928,6 +4989,7 @@ export async function runChildProcess(
           (code: number | null, signal: NodeJS.Signals | null) => {
             if (timeout) clearTimeout(timeout);
             clearTerminalCleanupTimers();
+            if (abortEscalationTimer) clearTimeout(abortEscalationTimer);
             runningProcesses.delete(runId);
             void logChain.finally(() => {
               void Promise.resolve()
@@ -4937,6 +4999,7 @@ export async function runChildProcess(
                     exitCode: code,
                     signal,
                     timedOut,
+                    aborted,
                     stdout,
                     stderr,
                     pid: child.pid ?? null,

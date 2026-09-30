@@ -3,7 +3,16 @@ import { isPidAlive, isProcessGroupAlive, terminateLocalService } from "../../..
 import type { RunProcessController } from "../application/ports.js";
 import type { RunProcessCleanupOutcome, RunProcessMetadata } from "../application/types.js";
 
-const SESSIONED_LOCAL_ADAPTERS = new Set([
+// Membership answers one question only: is this run's provider a local child
+// process that Paperclip owns and must terminate? The eight sessioned CLI
+// adapters qualify because they spawn their provider locally, and so does
+// `process`, whose child is registered in `runningProcesses` by
+// runChildProcess and whose pid/group reach the run row through `onSpawn`.
+// Session resumability is irrelevant here and `process` has none, so the set is
+// named for the property it actually gates. Adapters that are sessioned but
+// not local (`cursor_cloud`) stay out, and remote gateways stay out because
+// there is no local pid to signal.
+const LOCAL_CHILD_PROCESS_ADAPTERS = new Set([
   "claude_local",
   "codex_local",
   "cursor",
@@ -12,6 +21,7 @@ const SESSIONED_LOCAL_ADAPTERS = new Set([
   "kimi_local",
   "opencode_local",
   "pi_local",
+  "process",
 ]);
 
 function isValidPositivePid(value: number | null): value is number {
@@ -21,7 +31,7 @@ function isValidPositivePid(value: number | null): value is number {
 export function createProcessAdapter(): RunProcessController {
   return {
     async cleanupRunProcess(input: RunProcessMetadata): Promise<RunProcessCleanupOutcome> {
-      if (!SESSIONED_LOCAL_ADAPTERS.has(input.adapterType)) {
+      if (!LOCAL_CHILD_PROCESS_ADAPTERS.has(input.adapterType)) {
         return { attempted: false, outcome: "skipped_non_local_adapter", adapterType: input.adapterType };
       }
 
