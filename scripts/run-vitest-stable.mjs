@@ -9,6 +9,13 @@ import { loadShardDurations, selectGeneralServerShard } from "./general-server-s
 import { assertSelectedTests, partitionTestLines } from "./test-line-shard.mjs";
 
 const repoRoot = process.cwd();
+// Invoke Vitest through its JS entry with the current Node binary rather than
+// through `pnpm exec`. `pnpm` is a batch shim on Windows, which CreateProcess
+// cannot execute directly, and routing through a shell would need per-argument
+// quoting. Running the entry point with process.execPath is portable, avoids
+// quoting hazards on checkout paths containing spaces, and skips a process
+// layer.
+const vitestEntry = path.join(repoRoot, "node_modules", "vitest", "vitest.mjs");
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const generalServerShardDurations = loadShardDurations(
   path.join(scriptsDir, "general-server-shard-durations.json"),
@@ -326,7 +333,7 @@ function runVitest(args, label, testShard = null) {
   if (testShard) {
     const collect = (filters, name) => {
       const output = path.join(testRoot, `${name}.json`);
-      const result = spawnSync("pnpm", ["exec", "vitest", "list", ...sourceOnlyVitestArgs,
+      const result = spawnSync(process.execPath, [vitestEntry, "list", ...sourceOnlyVitestArgs,
         ...filters, "--allowOnly=false", "--includeTaskLocation", `--json=${output}`], {
         cwd: repoRoot, env, stdio: "inherit",
       });
@@ -342,7 +349,7 @@ function runVitest(args, label, testShard = null) {
     console.log(`[test:run] chat shard ${testShard.index + 1}/${testShard.count}: ${selected.tests.length}/${collected.length} tests, ${selected.lines.length} source lines; exact filter coverage verified`);
     args.push("--allowOnly=false");
   }
-  const result = spawnSync("pnpm", ["exec", "vitest", "run", ...sourceOnlyVitestArgs, ...args], {
+  const result = spawnSync(process.execPath, [vitestEntry, "run", ...sourceOnlyVitestArgs, ...args], {
     cwd: repoRoot,
     env,
     stdio: "inherit",

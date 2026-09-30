@@ -38,7 +38,9 @@ describe("skills catalog package artifacts", () => {
     let metadata = readPackMetadata(createPackDestination());
 
     if (!metadata.files.some((entry) => entry.path === "dist/generated/catalog.json")) {
-      execFileSync("pnpm", ["--filter", "@paperclipai/skills-catalog", "build"], {
+      // pnpm is a batch shim on Windows; execFileSync without a shell cannot
+      // resolve the bare name there.
+      execFileSync(process.platform === "win32" ? "pnpm.cmd" : "pnpm", ["--filter", "@paperclipai/skills-catalog", "build"], {
         cwd: packageRoot,
         stdio: "ignore",
       });

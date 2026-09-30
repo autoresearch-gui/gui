@@ -39,7 +39,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "clean": "rm -rf dist",
+    "clean": "node ../../scripts/build-fs.mjs clean dist",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

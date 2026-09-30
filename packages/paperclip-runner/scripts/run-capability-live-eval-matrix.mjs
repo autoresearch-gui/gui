@@ -1,9 +1,14 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const packageRoot = resolve(import.meta.dirname, "..");
-const suite = await import(resolve(packageRoot, "dist/conformance/capability-eval-suite.js"));
-const evals = await import(resolve(packageRoot, "dist/eval/index.js"));
+// `import()` needs a file:// URL. A raw absolute path is rejected on Windows
+// with ERR_UNSUPPORTED_ESM_URL_SCHEME.
+const suite = await import(
+  pathToFileURL(resolve(packageRoot, "dist/conformance/capability-eval-suite.js")).href
+);
+const evals = await import(pathToFileURL(resolve(packageRoot, "dist/eval/index.js")).href);
 const packageManifest = JSON.parse(await readFile(resolve(packageRoot, "package.json"), "utf8"));
 const args = process.argv.slice(2);
 if (args.some((argument) => argument !== "--dry-run")) {

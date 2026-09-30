@@ -37,7 +37,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "clean": "rm -rf dist",
+    "clean": "node ../../../scripts/build-fs.mjs clean dist",
     "test": "pnpm -w exec vitest run --root packages/plugins/create-paperclip-plugin --config vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },

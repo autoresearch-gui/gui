@@ -45,8 +45,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && cp src/server/grok-auth-merge-decision.cjs dist/server/",
-    "clean": "rm -rf dist",
+    "build": "tsc && node ../../../scripts/build-fs.mjs copy src/server/grok-auth-merge-decision.cjs dist/server/",
+    "clean": "node ../../../scripts/build-fs.mjs clean dist",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

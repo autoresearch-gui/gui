@@ -25,7 +25,9 @@ function stopAll(code) {
 }
 
 for (const job of jobs) {
-  const child = spawn("pnpm", ["run", job.script], {
+  // pnpm is a batch shim on Windows; spawn without a shell cannot resolve the
+  // bare name there.
+  const child = spawn(process.platform === "win32" ? "pnpm.cmd" : "pnpm", ["run", job.script], {
     stdio: ["ignore", "pipe", "pipe"],
     env: process.env,
   });

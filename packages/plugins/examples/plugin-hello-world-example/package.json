@@ -15,7 +15,7 @@
   "scripts": {
     "prebuild": "pnpm --filter @paperclipai/plugin-sdk ensure-build-deps",
     "build": "tsc",
-    "clean": "rm -rf dist",
+    "clean": "node ../../../../scripts/build-fs.mjs clean dist",
     "typecheck": "pnpm --filter @paperclipai/plugin-sdk ensure-build-deps && tsc --noEmit"
   },
   "dependencies": {

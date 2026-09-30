@@ -103,8 +103,11 @@ function packLocalPackage(packagePath: string, outputDir: string): string {
   const sdkBundleDir = path.join(outputDir, ".paperclip-sdk");
 
   fs.mkdirSync(sdkBundleDir, { recursive: true });
-  execFileSync("pnpm", ["build"], { cwd: packagePath, stdio: "pipe" });
-  execFileSync("pnpm", ["pack", "--pack-destination", sdkBundleDir], { cwd: packagePath, stdio: "pipe" });
+  // pnpm is a batch shim on Windows; execFileSync without a shell cannot resolve
+  // the bare name there.
+  const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+  execFileSync(pnpmCommand, ["build"], { cwd: packagePath, stdio: "pipe" });
+  execFileSync(pnpmCommand, ["pack", "--pack-destination", sdkBundleDir], { cwd: packagePath, stdio: "pipe" });
 
   const tarballPath = path.join(sdkBundleDir, tarballFileName);
   if (!fs.existsSync(tarballPath)) {

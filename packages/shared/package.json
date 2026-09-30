@@ -40,8 +40,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && mkdir -p dist/cliplab && cp src/cliplab/LICENSE src/cliplab/PROVENANCE.md dist/cliplab/",
-    "clean": "rm -rf dist",
+    "build": "tsc && node ../../scripts/build-fs.mjs mkdir dist/cliplab && node ../../scripts/build-fs.mjs copy src/cliplab/LICENSE src/cliplab/PROVENANCE.md dist/cliplab/",
+    "clean": "node ../../scripts/build-fs.mjs clean dist",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

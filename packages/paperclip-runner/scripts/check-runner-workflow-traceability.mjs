@@ -1,8 +1,11 @@
 import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const packageRoot = resolve(import.meta.dirname, "..");
-const evals = await import(resolve(packageRoot, "dist/eval/index.js"));
+// `import()` needs a file:// URL. A raw absolute path is rejected on Windows
+// with ERR_UNSUPPORTED_ESM_URL_SCHEME.
+const evals = await import(pathToFileURL(resolve(packageRoot, "dist/eval/index.js")).href);
 const manifest = JSON.parse(await readFile(resolve(packageRoot, "spec/evals/stress-workflow-traceability.json"), "utf8"));
 const summary = evals.validateStressTraceabilityManifest(manifest);
 for (const finding of manifest.findings) {

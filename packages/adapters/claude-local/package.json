@@ -47,7 +47,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "clean": "rm -rf dist",
+    "clean": "node ../../../scripts/build-fs.mjs clean dist",
     "typecheck": "tsc --noEmit",
     "probe:quota": "pnpm exec tsx src/cli/quota-probe.ts --json",
     "probe:quota:raw": "pnpm exec tsx src/cli/quota-probe.ts --json --raw-cli"

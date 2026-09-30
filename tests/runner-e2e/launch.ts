@@ -345,7 +345,9 @@ async function runProcess(
   interactive: boolean,
 ) {
   const log = createWriteStream(logPath, { flags: "a", mode: 0o600 });
-  const child = spawn("pnpm", args, {
+  // pnpm is a batch shim on Windows; spawn without a shell cannot resolve the
+  // bare name there.
+  const child = spawn(process.platform === "win32" ? "pnpm.cmd" : "pnpm", args, {
     cwd: repositoryRoot,
     env,
     stdio: ["inherit", "pipe", "pipe"],

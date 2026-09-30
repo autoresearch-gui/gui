@@ -96,7 +96,7 @@
     "test:command-resolution": "vitest run src/server/command-resolution.test.ts",
     "prepack": "node scripts/prepare-publish-package.mjs",
     "postpack": "node scripts/restore-dev-package.mjs",
-    "clean": "rm -rf dist"
+    "clean": "node ../../../scripts/build-fs.mjs clean dist"
   },
   "dependencies": {
     "@paperclipai/adapter-utils": "workspace:*",

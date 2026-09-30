@@ -46,8 +46,8 @@
     "skills"
   ],
   "scripts": {
-    "build": "tsc && cp src/server/codex-auth-merge-decision.cjs src/server/codex-auth-merge-extract.sh dist/server/",
-    "clean": "rm -rf dist",
+    "build": "tsc && node ../../../scripts/build-fs.mjs copy src/server/codex-auth-merge-decision.cjs src/server/codex-auth-merge-extract.sh dist/server/",
+    "clean": "node ../../../scripts/build-fs.mjs clean dist",
     "typecheck": "tsc --noEmit",
     "probe:quota": "pnpm exec tsx src/cli/quota-probe.ts --json"
   },
