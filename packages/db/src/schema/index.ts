@@ -214,3 +214,5 @@ export { announcementDismissals, announcementPublications } from "./announcement
 export { chatTaskHandoffs, chatCompletionDeliveries } from "./chat_completion_deliveries.js";
 
 export { agentInstructionRevisions, agentInstructionHeads, agentInstructionWorkingCopies } from "./agent_instruction_revisions.js";
+
+export { studies, experimentIdeas, experiments, experimentVerdicts } from "./studies.js";

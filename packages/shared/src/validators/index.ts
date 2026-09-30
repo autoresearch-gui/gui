@@ -705,6 +705,25 @@ export {
 } from "./routine.js";
 
 export {
+  createStudySchema,
+  updateStudySchema,
+  startStudySchema,
+  concludeStudySchema,
+  recordVerdictSchema,
+  createExperimentIdeaSchema,
+  shortlistIdeaSchema,
+  rejectIdeaSchema,
+  type CreateStudy,
+  type UpdateStudy,
+  type StartStudy,
+  type ConcludeStudy,
+  type RecordVerdict,
+  type CreateExperimentIdea,
+  type ShortlistIdea,
+  type RejectIdea,
+} from "./study.js";
+
+export {
   createCostEventSchema,
   updateBudgetSchema,
   type CreateCostEvent,

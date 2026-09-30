@@ -875,7 +875,10 @@ export type FinanceUnit = (typeof FINANCE_UNITS)[number];
 export const BUDGET_SCOPE_TYPES = ["company", "agent", "project"] as const;
 export type BudgetScopeType = (typeof BUDGET_SCOPE_TYPES)[number];
 
-export const BUDGET_METRICS = ["billed_cents"] as const;
+// `gpu_minutes` measures GPU wall time consumed by study experiments, so a
+// budget on it caps compute spend rather than cash spend. `billed_cents` is the
+// cash metric and stays the default.
+export const BUDGET_METRICS = ["billed_cents", "gpu_minutes"] as const;
 export type BudgetMetric = (typeof BUDGET_METRICS)[number];
 
 export const BUDGET_WINDOW_KINDS = ["calendar_month_utc", "lifetime"] as const;
@@ -892,6 +895,74 @@ export const BUDGET_INCIDENT_RESOLUTION_ACTIONS = [
   "raise_budget_and_resume",
 ] as const;
 export type BudgetIncidentResolutionAction = (typeof BUDGET_INCIDENT_RESOLUTION_ACTIONS)[number];
+
+export const STUDY_STATUSES = ["setup", "active", "paused", "concluded"] as const;
+export type StudyStatus = (typeof STUDY_STATUSES)[number];
+
+export const EXPERIMENT_STATUSES = [
+  "queued",
+  "running",
+  "succeeded",
+  "crashed",
+  "timed_out",
+  "kept",
+  "discarded",
+] as const;
+export type ExperimentStatus = (typeof EXPERIMENT_STATUSES)[number];
+
+// Exactly three values. This mirrors the upstream autoresearch results.tsv
+// contract, which fixes status to keep|discard|crash. Do not widen it.
+export const EXPERIMENT_VERDICTS = ["keep", "discard", "crash"] as const;
+export type ExperimentVerdict = (typeof EXPERIMENT_VERDICTS)[number];
+
+export const EXPERIMENT_VERDICT_REASONS = [
+  "val_bpb_improved",
+  "val_bpb_regressed",
+  "within_noise_equal",
+  "simplification_win",
+  "operator_override",
+] as const;
+export type ExperimentVerdictReason = (typeof EXPERIMENT_VERDICT_REASONS)[number];
+
+// `adopt_simplification` advances the branch to the experiment commit WITHOUT
+// moving bestValBpb. It exists so a simplification win (equal val_bpb, less
+// code) is not destroyed by a pure-metric verdict.
+export const EXPERIMENT_GIT_ACTIONS = [
+  "advanced",
+  "reset_to_sha",
+  "adopt_simplification",
+] as const;
+export type ExperimentGitAction = (typeof EXPERIMENT_GIT_ACTIONS)[number];
+
+export const EXPERIMENT_KINDS = ["baseline", "hypothesis"] as const;
+export type ExperimentKind = (typeof EXPERIMENT_KINDS)[number];
+
+export const IDEA_STATUSES = [
+  "proposed",
+  "shortlisted",
+  "rejected",
+  "won",
+  "abandoned",
+] as const;
+export type IdeaStatus = (typeof IDEA_STATUSES)[number];
+
+export const IDEA_EXPECTED_DIRECTIONS = ["improve", "neutral", "explore"] as const;
+export type IdeaExpectedDirection = (typeof IDEA_EXPECTED_DIRECTIONS)[number];
+
+export const IDEA_FAMILIES = [
+  "lr",
+  "optimizer",
+  "architecture",
+  "tokenizer",
+  "positional",
+  "batch",
+  "window",
+  "other",
+] as const;
+export type IdeaFamily = (typeof IDEA_FAMILIES)[number];
+
+export const BASELINE_SOURCES = ["framework_run", "imported_tsv", "human_provided"] as const;
+export type BaselineSource = (typeof BASELINE_SOURCES)[number];
 
 export const HEARTBEAT_INVOCATION_SOURCES = [
   "timer",

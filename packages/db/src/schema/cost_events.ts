@@ -26,6 +26,11 @@ export const costEvents = pgTable(
     cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     costCents: integer("cost_cents").notNull(),
+    // GPU wall time for budget and utilisation reporting. A GPU-time cost event is
+    // recorded with `costCents: 0` and `gpuSeconds` set, which leaves company and agent
+    // spend untouched: services/costs.ts sums cost_cents, so a GPU-minutes value must
+    // never be written into cost_cents. There is deliberately no metric column here.
+    gpuSeconds: integer("gpu_seconds"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
