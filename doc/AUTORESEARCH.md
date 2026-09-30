@@ -92,26 +92,77 @@ look generous.
 | GPU | NVIDIA GeForce RTX 4060 Ti, 16380 MiB, driver 617.14 |
 | Architecture | Ada, which the fork's matrix supports at >= 10 GB |
 | Autotune cache | `%LOCALAPPDATA%\autoresearch\gpu-profile-v2.json` |
-| Throughput | ~36,000 tok/s |
-| Baseline run | `val_bpb 1.024859`, 32 steps, 311.5s training |
-| Evaluation | ~360s |
-| **Total wall clock per experiment** | **~677s (11.3 min)** |
+| Throughput | ~36,800 tok/s |
+| Baseline run | `val_bpb 1.007766` mean, 33 steps, ~312s training |
+| Evaluation | ~325s |
+| **Total wall clock per experiment** | **~642s (10.7 min)** |
+| **Experiments per hour** | **~5.6** |
 | Peak VRAM | 2985 MiB, which is 18% of the card |
 
 Three consequences worth internalising:
 
-1. **Evaluation costs more than training.** `EVAL_TOKENS = 40 * 2**19` forward
-   tokens over a batch the autotuner left small. So an experiment is ~11 minutes,
-   not ~5.5.
+1. **Evaluation costs about as much as training.** `EVAL_TOKENS = 40 * 2**19`
+   forward tokens over a batch the autotuner left small. So an experiment is
+   ~10.7 minutes, not the ~5.5 the upstream README assumes.
 2. **The upstream "kill past 10 minutes" rule would discard every run here.** It
    assumes a much faster GPU. `killAfterSec` defaults to 900s.
-3. **Throughput is ~5.3 experiments/hour, not the ~12/hour the upstream README
-   quotes**, which likewise assumes a faster GPU. The arena is pipelined so idea
-   proposal overlaps training, but the GPU is the floor.
+3. **Throughput is ~5.6 experiments/hour, not the ~12/hour the upstream README
+   quotes**, which likewise assumes a faster GPU. Expect roughly 45 experiments
+   across an eight-hour night.
 
 The GPU is also 82% idle, because the autotuner picked `train_batch_size: 8` and
 `activation_checkpointing: true` on a card with 16 GB. Raising the batch is
-exactly the kind of change the agent is supposed to discover.
+exactly the kind of change the agent is supposed to discover, and given that
+evaluation dominates the wall clock, a larger evaluation batch is probably the
+single highest-value experiment available.
+
+## The noise floor
+
+Five identical runs at the same commit, with `train.py`'s fixed seeds:
+
+```
+val_bpb  1.002385  1.006632  1.008197  1.010353  1.011264
+mean     1.007766
+range    0.008879      <- the noise floor a study records
+stdev    0.003513
+```
+
+The framework needs this number, because without it "0.003 better" and "noise"
+are indistinguishable. Two consequences that are easy to miss:
+
+- **The seeds do not make a run reproducible.** They do, in the sense that the
+  data order and initialisation are fixed, but cuDNN kernel selection and
+  reduction ordering in backward passes are not deterministic, and on a consumer
+  card that is worth about 0.004 of `val_bpb` run to run.
+- **`program.md`'s own example of a worthwhile improvement is below the noise
+  floor on this machine.** It uses "a 0.001 val_bpb improvement" and "0.003
+  better" as the scale of a decision worth making. Here, 0.003 is about a third of
+  the run-to-run spread, so treating it as a real improvement would mean
+  advancing the branch on noise. Any research protocol tuned for this card needs
+  its thresholds re-calibrated against a measured floor, not carried over from
+  the upstream prose.
+
+A study therefore runs its baseline three times at setup, records the range as
+`noiseFloorBpb`, and the verdict logic treats anything inside that band as
+"within noise" rather than better or worse.
+
+## Run stability
+
+Two of seven baseline invocations failed with `exitCode 0xFFFFFFFF`, no Python
+traceback, and in one case an empty log - the signature of an external
+`TerminateProcess` rather than a crash inside the trainer. One died cleanly at
+step 28 of 33 with no error output at all.
+
+That is roughly a 28% environmental failure rate on this machine, and it is the
+largest outstanding operational risk to an overnight study. `git` power settings
+already disable sleep on AC and hibernate entirely, so it is not sleep. The
+executor classifies these correctly - they settle as `crash` with the branch
+reset, and the study counts them in `consecutiveCrashes` - so they cost a run
+rather than corrupting the ledger. If the rate holds, the pulse's five-crash
+circuit breaker will stop the study rather than burn the night, which is the
+correct behaviour but means a machine that fails this often will not survive
+overnight unattended. Worth characterising before relying on it: run the baseline
+ten times and capture whether any produce a Python traceback at all.
 
 ## The Windows cache path
 

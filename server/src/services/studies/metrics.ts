@@ -10,16 +10,24 @@ import { renameSync, writeFileSync } from "node:fs";
  * the model cannot buy itself a "win".
  *
  * The wall-clock figures below are measured, not guessed. Gate 0 on an RTX 4060
- * Ti (16 GB) produced this baseline run:
+ * Ti (16 GB) measured five baseline runs at the same commit:
  *
- *   val_bpb 1.024859 | training_seconds 311.5 | total_seconds 672.0
- *   num_steps 32 | mfu 10.01 | peak_vram_mb 2985.3 | wall clock 676.6s
+ *   val_bpb  1.002385  1.006632  1.008197  1.010353  1.011264
+ *   mean     1.007766 | range 0.008879 | stdev 0.003513
+ *   training_seconds ~312 | num_steps 33 | mfu ~10 | peak_vram_mb 2985.3
+ *   wall clock ~642s
  *
- * Two things that run disproved. First, evaluation over the full
- * `EVAL_TOKENS = 40 * 2 ** 19` costs ~360s, which is longer than the 300s of
- * training, so a whole experiment is ~11 minutes rather than the ~5.5 the
- * upstream README implies. Second, the upstream "kill past 10 minutes" rule was
- * written for a much faster GPU and would have discarded this run outright.
+ * Two things that measurement disproved. First, evaluation over the full
+ * `EVAL_TOKENS = 40 * 2 ** 19` costs about as much as training, so a whole
+ * experiment is ~10.7 minutes rather than the ~5.5 the upstream README implies.
+ * Second, the upstream "kill past 10 minutes" rule was written for a much faster
+ * GPU and would have discarded every run on this hardware.
+ *
+ * The spread also matters beyond the kill timeout. A 0.003 improvement - the
+ * scale `program.md` uses when discussing its simplicity criterion - is about a
+ * third of the 0.0089 run-to-run range, so a study on this card has to compare
+ * against a measured floor or it will advance the branch on noise. See
+ * `doc/AUTORESEARCH.md`.
  *
  * These constants are therefore deliberately generous. The plausibility gate
  * exists to catch a fabricated or truncated metrics block, not to police benign

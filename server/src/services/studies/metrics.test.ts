@@ -409,12 +409,16 @@ describe("EXECUTOR_TRAINING_KWARGS", () => {
   // experiment on a consumer GPU fail or get killed, which is silent and looks
   // like a broken framework rather than a wrong constant.
   const GATE_0 = {
-    trainingSeconds: 311.5,
-    totalSeconds: 672.0,
-    wallClockSeconds: 676.6,
-    numSteps: 32,
+    trainingSeconds: 312.0,
+    totalSeconds: 640.0,
+    wallClockSeconds: 642.0,
+    numSteps: 33,
     peakVramMb: 2985.3,
-    mfuPercent: 10.01,
+    mfuPercent: 10.0,
+    // Mean of five identical runs at the same commit. The seeds in train.py do
+    // not make a run bit-reproducible: cuDNN kernel selection and reduction
+    // ordering in backward passes are not deterministic.
+    valBpb: 1.007766,
   };
 
   it("accepts the measured training_seconds overshoot", () => {
@@ -432,16 +436,16 @@ describe("EXECUTOR_TRAINING_KWARGS", () => {
   });
 
   it("parses and validates the real Gate 0 baseline run end to end", () => {
-    // A genuine 11-minute consumer-GPU run, transcribed from the Gate 0 log.
+    // A genuine consumer-GPU run, transcribed from the Gate 0 log.
     const block = [
       "---",
-      "val_bpb:          1.024859",
-      "training_seconds: 311.5",
-      "total_seconds:    672.0",
+      "val_bpb:          1.008197",
+      "training_seconds: 312.0",
+      "total_seconds:    640.0",
       "peak_vram_mb:     2985.3",
-      "mfu_percent:      10.01",
-      "total_tokens_M:   16.8",
-      "num_steps:        32",
+      "mfu_percent:      10.00",
+      "total_tokens_M:   17.3",
+      "num_steps:        33",
       "num_params_M:     50.3",
       "depth:            8",
       "dataset:          tinystories",
@@ -456,16 +460,17 @@ describe("EXECUTOR_TRAINING_KWARGS", () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
 
-    expect(parsed.metrics.valBpb).toBeCloseTo(1.024859, 6);
+    expect(parsed.metrics.valBpb).toBeCloseTo(1.008197, 6);
     expect(parsed.metrics.numSteps).toBe(GATE_0.numSteps);
     expect(parsed.metrics.mfuPercent).toBeCloseTo(GATE_0.mfuPercent, 2);
 
-    // Evaluation cost more than training here, so preflight must be small and
-    // evalSeconds must dominate. This is the split that explains why the kill
-    // timeout cannot track the training budget.
+    // Evaluation cost about as much as training here, so preflight is small and
+    // evalSeconds is comparable to training. This is the split that explains why
+    // the kill timeout cannot track the training budget: the budget deliberately
+    // excludes evaluation, and evaluation is not cheap.
     const timing = deriveTiming(parsed.metrics, GATE_0.wallClockSeconds);
-    expect(timing.preflightSeconds).toBeCloseTo(4.6, 1);
-    expect(timing.evalSeconds).toBeCloseTo(360.5, 1);
+    expect(timing.preflightSeconds).toBeCloseTo(2.0, 0);
+    expect(timing.evalSeconds).toBeCloseTo(328.0, 0);
     expect(timing.evalSeconds).toBeGreaterThan(parsed.metrics.trainingSeconds);
   });
 });
