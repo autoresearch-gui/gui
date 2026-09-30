@@ -45,6 +45,7 @@ import { createHash } from "node:crypto";
 import {
   closeSync,
   existsSync,
+  mkdirSync,
   openSync,
   readFileSync,
   renameSync,
@@ -52,7 +53,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** Bumped only when a change to this file can change which runs are accepted. */
@@ -1010,6 +1011,11 @@ export function checkPlausibility(parsed, opts = {}) {
  */
 export function writeJsonAtomic(outPath, value) {
   const temporaryPath = `${outPath}.tmp`;
+  // Create the destination directory here rather than relying on the caller. A
+  // missing directory must not be able to discard an eleven-minute GPU run, and
+  // this must happen before training starts rather than at write time, so the
+  // failure surfaces in seconds instead of after the whole budget is spent.
+  mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   renameSync(temporaryPath, outPath);
 }
@@ -1106,6 +1112,7 @@ export function runTraining(options, { env, logPath, platform = process.platform
       // One descriptor for both stdout and stderr so the two streams interleave
       // in the order the trainer produced them, as `program.md` requires. Two
       // descriptors would produce two files or an arbitrary merge.
+      mkdirSync(dirname(logPath), { recursive: true });
       logFd = openSync(logPath, "w");
     } catch (error) {
       resolve({
