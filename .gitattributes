@@ -1,0 +1,16 @@
+# Store LF in the repository and check out LF in every working tree.
+#
+# The Docker image copies the working tree verbatim, and several build-time
+# checks compare files byte-for-byte rather than logically. The
+# paperclip-runner protocol manifest hashes its schema and fixture files with
+# sha256, so a Windows checkout that turned those into CRLF failed the image
+# build with "The generated PRP contract manifest is stale" even though nothing
+# had actually changed.
+#
+# Pinning the eol here fixes that for every contributor and for CI. Setting
+# core.autocrlf in a local git config cannot: it is per-machine, invisible to
+# the next person, and the setting that caused the failure in the first place.
+* text=auto eol=lf
+
+# Patches are applied as text and must not gain or lose line endings.
+patches/*.patch text eol=lf whitespace=-space-before-tab
