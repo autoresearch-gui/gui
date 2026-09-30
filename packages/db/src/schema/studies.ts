@@ -247,8 +247,11 @@ export const experimentVerdicts = pgTable(
     targetSha: text("target_sha"),
     reason: text("reason"),
     actorType: text("actor_type").notNull(),
-    // Agent or user id depending on actor_type; the id space is not shared.
-    actorId: uuid("actor_id"),
+    // Text, not uuid, matching `activity_log.actorId`. The actor space is not
+    // shared: an agent or user row has a uuid, but the framework acts as
+    // `system` with ids like "study_framework" or "study_orphan_reconciler",
+    // which are not uuids and would fail an insert.
+    actorId: text("actor_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
