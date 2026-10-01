@@ -13,6 +13,13 @@ import {
   prepareGitHubExecutionEnvironment,
   runAdapterExecutionTargetProcess,
 } from "./execution-target.js";
+import { isLinuxSandboxHost } from "./test-support/linux-sandbox-gate.js";
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
 
 const exec = promisify(execFile);
 const roots: string[] = [];
@@ -66,7 +73,7 @@ async function sandbox(layout: string) {
   return { root, bin, remotePath, runner, target };
 }
 
-describe("managed GitHub launcher environment", () => {
+describeLinuxSandbox("managed GitHub launcher environment", () => {
   it.each(["module", "commonjs"])("runs managed GitHub launchers inside a %s project", async (type) => {
     const fixture = await sandbox("usr/bin");
     const packageJson = JSON.stringify({ type });

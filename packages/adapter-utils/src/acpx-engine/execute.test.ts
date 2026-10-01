@@ -10,6 +10,8 @@ import {
   startAdapterExecutionTargetPaperclipBridge,
   startAdapterExecutionTargetProcessSessionBridge,
 } from "@paperclipai/adapter-utils/execution-target";
+import { isLinuxSandboxHost } from "../test-support/linux-sandbox-gate.js";
+
 
 // Wrap the staging seam + both sandbox bridges in call-recording spies that
 // still delegate to the real implementations (a runner-backed sandbox test
@@ -46,6 +48,11 @@ import {
   runWithRuntimeParent,
   SANDBOX_STARTUP_SPAN_ATTRS,
 } from "./startup-timing.js";
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
 
 
 const tempRoots: string[] = [];
@@ -375,7 +382,7 @@ const ALLOWED_TURN_SPAN_ATTRIBUTE_KEYS = new Set<string>([
   "paperclip.agent.turn.wall_ms",
 ]);
 
-describe("shared ACPX engine runtime behavior", () => {
+describeLinuxSandbox("shared ACPX engine runtime behavior", () => {
   it.each(["claude", "codex", "gemini", "kimi", "custom"])("defaults the legacy %s engine to full auto on fresh and resumed runs", async (agent) => {
     const root = await makeTempRoot();
     const config = {
@@ -2801,7 +2808,7 @@ describe("findAncestorBin", () => {
   });
 });
 
-describe("gemini ACP flag selection", () => {
+describeLinuxSandbox("gemini ACP flag selection", () => {
   it("parses semantic version parts from gemini --version output", () => {
     expect(parseGeminiVersionParts("0.30.0")).toEqual([0, 30, 0]);
     expect(parseGeminiVersionParts("gemini-cli v1.2.3\n")).toEqual([1, 2, 3]);
@@ -3147,7 +3154,7 @@ describe("summarizeAcpxTurnUsage no-report turns", () => {
   });
 });
 
-describe("ACPX engine remote sandbox staging seam (PR 1: workspace + cwd)", () => {
+describeLinuxSandbox("ACPX engine remote sandbox staging seam (PR 1: workspace + cwd)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -3440,7 +3447,7 @@ describe("ACPX engine remote sandbox staging seam (PR 1: workspace + cwd)", () =
   });
 });
 
-describe("ACPX engine remote managed-home seam (PR 2: per-adapter home seed)", () => {
+describeLinuxSandbox("ACPX engine remote managed-home seam (PR 2: per-adapter home seed)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -3634,7 +3641,7 @@ describe("ACPX engine remote managed-home seam (PR 2: per-adapter home seed)", (
   });
 });
 
-describe("ACPX engine Claude skill bundle staging (remote ACP lane)", () => {
+describeLinuxSandbox("ACPX engine Claude skill bundle staging (remote ACP lane)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -3907,7 +3914,7 @@ describe("ACPX engine Claude skill bundle staging (remote ACP lane)", () => {
   });
 });
 
-describe("ACPX engine remote session-lifecycle re-staging (PR 3: stage once / reuse on compatible resume)", () => {
+describeLinuxSandbox("ACPX engine remote session-lifecycle re-staging (PR 3: stage once / reuse on compatible resume)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -4659,7 +4666,7 @@ describe("ACPX engine remote session-lifecycle re-staging (PR 3: stage once / re
   });
 });
 
-describe("ACPX engine sandbox-start spans (opt-in root + child parenting)", () => {
+describeLinuxSandbox("ACPX engine sandbox-start spans (opt-in root + child parenting)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -5721,7 +5728,7 @@ describe("ACPX engine sandbox-start spans (opt-in root + child parenting)", () =
   });
 });
 
-describe("ACPX engine per-step startup timing (run.startup.step events)", () => {
+describeLinuxSandbox("ACPX engine per-step startup timing (run.startup.step events)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -5927,7 +5934,7 @@ describe("ACPX engine per-step startup timing (run.startup.step events)", () => 
   });
 });
 
-describe("ACPX engine run lifecycle corrections (F1: settle every failure after buildRuntime)", () => {
+describeLinuxSandbox("ACPX engine run lifecycle corrections (F1: settle every failure after buildRuntime)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -6331,7 +6338,7 @@ describe("ACPX engine run lifecycle corrections (F2: close the runtime for every
   });
 });
 
-describe("ACPX engine run lifecycle corrections (F3: one teardown error policy)", () => {
+describeLinuxSandbox("ACPX engine run lifecycle corrections (F3: one teardown error policy)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -6765,7 +6772,7 @@ describe("ACPX engine run lifecycle corrections (F3: one teardown error policy)"
   });
 });
 
-describe("ACPX engine sandbox bridge run-disposition seam (fail-closed)", () => {
+describeLinuxSandbox("ACPX engine sandbox bridge run-disposition seam (fail-closed)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -7361,7 +7368,7 @@ describe("ACPX engine sandbox bridge run-disposition seam (fail-closed)", () => 
   });
 });
 
-describe("ACPX startup handshake guard and late-completion fence", () => {
+describeLinuxSandbox("ACPX startup handshake guard and late-completion fence", () => {
   afterEach(() => {
     vi.useRealTimers();
   });

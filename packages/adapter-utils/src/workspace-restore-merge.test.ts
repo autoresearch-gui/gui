@@ -5,6 +5,8 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { isLinuxSandboxHost } from "./test-support/linux-sandbox-gate.js";
+
 
 import { resolvePaperclipInstanceRootForAdapter } from "./server-utils.js";
 import {
@@ -20,7 +22,12 @@ import {
   WORKSPACE_RESTORE_LOCK_TIMEOUT_CODE,
 } from "./workspace-restore-merge.js";
 
-describe("workspace restore merge", () => {
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
+describeLinuxSandbox("workspace restore merge", () => {
   const cleanupDirs: string[] = [];
 
   afterEach(async () => {
@@ -606,7 +613,7 @@ describe("workspace restore merge", () => {
   });
 });
 
-describe("conflict-preserving directory restore", () => {
+describeLinuxSandbox("conflict-preserving directory restore", () => {
   it("preflights competing edits before applying any other change and deduplicates replay", async () => {
     const root = await fsPromises.realpath(await mkdtemp(path.join(os.tmpdir(), "directory-cas-")));
     const source = path.join(root, "source"), target = path.join(root, "target");

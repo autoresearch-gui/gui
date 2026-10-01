@@ -6,6 +6,8 @@ import { promisify } from "node:util";
 import { workspacePaths } from "./workspace-manifest.js";
 import { runWorkspaceGitProcess } from "./workspace-git-stream.js";
 import { afterEach, describe, expect, it } from "vitest";
+import { isLinuxSandboxHost } from "./test-support/linux-sandbox-gate.js";
+
 
 import {
   buildRemoteGitDeltaBundleScript,
@@ -29,6 +31,11 @@ import {
   withShallowGitWorkspaceClone,
 } from "./git-workspace-sync.js";
 
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
 const execFile = promisify(execFileCallback);
 
 const snapshots: GitWorkspaceSnapshot[] = [];
@@ -50,7 +57,7 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return (await runLocalGit(cwd, args)).stdout.trim();
 }
 
-describe("git workspace sync", () => {
+describeLinuxSandbox("git workspace sync", () => {
   const cleanupDirs: string[] = [];
 
   afterEach(async () => {

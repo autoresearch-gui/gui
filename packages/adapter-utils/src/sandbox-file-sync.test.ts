@@ -4,6 +4,8 @@ import path from "node:path";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
+import { isLinuxSandboxHost } from "./test-support/linux-sandbox-gate.js";
+
 
 import {
   assertSyncOperationsConfined,
@@ -11,6 +13,11 @@ import {
   type SandboxManagedRuntimeClient,
   type SandboxSyncOperation,
 } from "./sandbox-managed-runtime.js";
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
 
 const execFile = promisify(execFileCallback);
 
@@ -83,7 +90,7 @@ function makeNativeClient(): RecordingClient {
   return { client, syncInOps, syncOutOps };
 }
 
-describe("sandbox native file sync", () => {
+describeLinuxSandbox("sandbox native file sync", () => {
   const cleanupDirs: string[] = [];
   afterEach(async () => {
     while (cleanupDirs.length > 0) {

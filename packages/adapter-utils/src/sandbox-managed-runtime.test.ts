@@ -12,6 +12,8 @@ import {
   setExpensiveWorkspaceGitExecutor,
   WORKSPACE_GIT_SCAN_SATURATED_CODE,
 } from "./git-workspace-sync.js";
+import { isLinuxSandboxHost } from "./test-support/linux-sandbox-gate.js";
+
 
 import {
   assertSyncOperationsConfined,
@@ -42,6 +44,11 @@ import {
   type StartupTracer,
 } from "./acpx-engine/startup-timing.js";
 import type { RunProcessResult } from "./server-utils.js";
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
 
 function toArrayBuffer(bytes: Buffer): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
@@ -337,7 +344,7 @@ function createRecordingTraceContext(): {
   return { traceContext, spans };
 }
 
-describe("sandbox managed runtime", () => {
+describeLinuxSandbox("sandbox managed runtime", () => {
   const cleanupDirs: string[] = [];
 
   it.each(["host_current", "adopt_remote", "durable_seed"] as const)("stages and restores both project repositories with independent Git histories (%s)", async (mode) => {
@@ -2353,7 +2360,7 @@ describe("sandbox managed runtime", () => {
   describe("assertSyncOperationsConfined path flavours", () => {
     const mapping = (sourcePath: string, targetPath: string) => ({
       operationId: "op",
-      files: [{ sourcePath, targetPath }],
+      files: [{ sourcePath, targetPath, kind: "file" as const }],
     });
 
     it("accepts Windows host sources under a Windows root", () => {
@@ -3530,7 +3537,7 @@ function makeControlledSyncClient(options: { concurrent: boolean }): {
   return { client, control };
 }
 
-describe("sandbox managed runtime inbound coordinator", () => {
+describeLinuxSandbox("sandbox managed runtime inbound coordinator", () => {
   const cleanupDirs: string[] = [];
 
   afterEach(async () => {
@@ -3993,7 +4000,7 @@ function makeControlledAsset(
   };
 }
 
-describe("sandbox managed runtime outbound coordinator", () => {
+describeLinuxSandbox("sandbox managed runtime outbound coordinator", () => {
   const cleanupDirs: string[] = [];
 
   afterEach(async () => {
@@ -4279,7 +4286,7 @@ describe("sandbox managed runtime outbound coordinator", () => {
 // mapping. A client without native `syncOut` reads the bundle back through
 // `readFile`. These tests build a git-backed workspace and assert the transport
 // branch, the confinement guard, and the full-bundle retry.
-describe("sandbox git-bundle export transport", () => {
+describeLinuxSandbox("sandbox git-bundle export transport", () => {
   const cleanupDirs: string[] = [];
 
   afterEach(async () => {

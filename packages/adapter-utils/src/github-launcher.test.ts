@@ -6,11 +6,18 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { githubBrokerEnvironment, githubLauncherSource } from "./github-launcher.js";
+import { isLinuxSandboxHost } from "./test-support/linux-sandbox-gate.js";
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
 const exec = promisify(execFile);
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-describe("managed GitHub launchers", () => {
+describeLinuxSandbox("managed GitHub launchers", () => {
   it.each(["repository", "command"])("uses explicit %s identity for local commits without managed credentials", async (identitySource) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "paperclip-github-local-identity-"));
     cleanups.push(() => rm(root, { recursive: true, force: true }));

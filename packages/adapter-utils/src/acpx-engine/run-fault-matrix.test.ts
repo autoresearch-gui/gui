@@ -9,6 +9,8 @@ import {
 } from "@paperclipai/adapter-utils/execution-target";
 import { runChildProcess } from "../server-utils.js";
 import { classifyWorkspaceRestoreFailure } from "../workspace-restore-merge.js";
+import { isLinuxSandboxHost } from "../test-support/linux-sandbox-gate.js";
+
 
 // The composed fault matrix.
 //
@@ -45,6 +47,11 @@ import { settleAcpRun, type SettlementSteps } from "./settlement-sequence.js";
 import { createRunResourceLedger } from "./run-resource-ledger.js";
 import { LedgerStateError, type ResourceId } from "./run-contracts.js";
 import type { SettlementDispositionReport } from "./run-coordinator.js";
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
 
 const tempRoots: string[] = [];
 
@@ -286,7 +293,7 @@ const SANDBOX_WITH_MANAGED_HOME: ResourceId[] = [
   "acp_runtime",
 ];
 
-describe("composed ACPX run fault matrix", () => {
+describeLinuxSandbox("composed ACPX run fault matrix", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

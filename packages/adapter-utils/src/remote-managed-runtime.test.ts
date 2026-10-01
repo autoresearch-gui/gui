@@ -2,6 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { isLinuxSandboxHost } from "./test-support/linux-sandbox-gate.js";
+
 
 const {
   prepareWorkspaceForSshExecution,
@@ -29,7 +31,12 @@ import { prepareRemoteManagedRuntime } from "./remote-managed-runtime.js";
 import { resolveReferencedSourceIgnore } from "./sandbox-managed-runtime.js";
 import { setExpensiveWorkspaceGitExecutor } from "./git-workspace-sync.js";
 
-describe("remote managed runtime", () => {
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
+describeLinuxSandbox("remote managed runtime", () => {
   const cleanupDirs: string[] = [];
 
   it("stages all files over SSH without Git or cache exclusions and restores the same baseline", async () => {

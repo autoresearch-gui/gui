@@ -19,6 +19,13 @@ import {
   type SshEnvLabFixtureState,
 } from "./ssh.js";
 import { prepareRemoteManagedRuntime } from "./remote-managed-runtime.js";
+import { isLinuxSandboxHost } from "./test-support/linux-sandbox-gate.js";
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
 
 const SSH_FIXTURE_TEST_TIMEOUT_MS = 30_000;
 let sshEnvLabUnsupportedReason: string | null = null;
@@ -165,7 +172,7 @@ function parseProgressLine(line: string): ParsedProgressLine {
   return { raw: trimmed, percent: null, doneMb: null, totalMb: null };
 }
 
-describe("ssh env-lab fixture", () => {
+describeLinuxSandbox("ssh env-lab fixture", () => {
   afterEach(drainFixtureTeardowns);
   // Backstop: if a throw inside afterEach ever leaves an entry on the stack,
   // this drains it too instead of stranding a listener until the process exits.

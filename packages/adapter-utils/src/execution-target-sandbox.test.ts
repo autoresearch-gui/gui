@@ -8,6 +8,8 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { isLinuxSandboxHost } from "./test-support/linux-sandbox-gate.js";
+
 
 import { getSandboxDuplexGatewayCodecSource } from "./sandbox-callback-bridge.js";
 import {
@@ -76,6 +78,11 @@ import {
   type DuplexObservabilitySpanRecord,
 } from "./duplex-observability.js";
 
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
 const execFileAsync = promisify(execFile);
 
 type RecordedSpan = { name: string; parentName: string | null; ended: boolean };
@@ -114,7 +121,7 @@ function createRecordingTraceContext(): {
   return { traceContext, spans };
 }
 
-describe("sandbox adapter execution targets", () => {
+describeLinuxSandbox("sandbox adapter execution targets", () => {
   const cleanupDirs: string[] = [];
 
   it("records successful issue comment ids for attribution recovery", () => {

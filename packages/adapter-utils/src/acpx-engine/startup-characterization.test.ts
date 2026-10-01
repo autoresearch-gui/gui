@@ -9,6 +9,8 @@ import {
   startAdapterExecutionTargetPaperclipBridge,
   startAdapterExecutionTargetProcessSessionBridge,
 } from "@paperclipai/adapter-utils/execution-target";
+import { isLinuxSandboxHost } from "../test-support/linux-sandbox-gate.js";
+
 
 // Wrap the staging seam + both sandbox bridges in call-recording spies that
 // still delegate to the real implementations. This copies the execute.test.ts
@@ -25,6 +27,11 @@ vi.mock("@paperclipai/adapter-utils/execution-target", async (importActual) => {
 });
 import { createAcpxEngineExecutor, type AcpxEngineExecutorOptions } from "./execute.js";
 import { runChildProcess } from "../server-utils.js";
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
 
 const tempRoots: string[] = [];
 
@@ -225,7 +232,7 @@ function completedTurn() {
   };
 }
 
-describe("ACPX engine startup characterization", () => {
+describeLinuxSandbox("ACPX engine startup characterization", () => {
   // Item 1 + 8: the remote launch env and its finalization point.
   describe("remote launch environment values", () => {
     beforeEach(() => vi.clearAllMocks());

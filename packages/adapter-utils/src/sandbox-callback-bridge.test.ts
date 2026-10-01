@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { isLinuxSandboxHost } from "./test-support/linux-sandbox-gate.js";
+
 
 import { getActiveStepContext, measureStartupStep } from "./acpx-engine/startup-timing.js";
 import { prepareCommandManagedRuntime } from "./command-managed-runtime.js";
@@ -30,9 +32,14 @@ import type { CommandManagedDuplexChannel } from "./command-managed-runtime.js";
 import type { RuntimeSpanRunner } from "./acpx-engine/startup-timing.js";
 import type { RunProcessResult } from "./server-utils.js";
 
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
 const execFile = promisify(execFileCallback);
 
-describe("sandbox callback bridge", () => {
+describeLinuxSandbox("sandbox callback bridge", () => {
   const cleanupDirs: string[] = [];
   const cleanupFns: Array<() => Promise<void>> = [];
 

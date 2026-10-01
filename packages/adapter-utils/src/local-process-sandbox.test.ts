@@ -12,6 +12,13 @@ import {
   parseLocalProcessSandboxExtraPaths,
 } from "./local-process-sandbox.js";
 import { runChildProcess } from "./server-utils.js";
+import { isLinuxSandboxHost } from "./test-support/linux-sandbox-gate.js";
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
 
 const cleanup: string[] = [];
 
@@ -30,7 +37,7 @@ afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((candidate) => fs.rm(candidate, { recursive: true, force: true })));
 });
 
-describe("local process sandbox", () => {
+describeLinuxSandbox("local process sandbox", () => {
   it.runIf(process.platform !== "linux")("rejects sandbox scopes on unsupported hosts", async () => {
     await expect(buildLocalProcessSandboxSpawnTarget({
       executable: process.execPath, args: ["-e", "process.exit(0)"], cwd: process.cwd(),

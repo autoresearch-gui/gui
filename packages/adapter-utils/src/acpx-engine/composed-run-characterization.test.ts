@@ -9,6 +9,8 @@ import {
   startAdapterExecutionTargetPaperclipBridge,
   startAdapterExecutionTargetProcessSessionBridge,
 } from "@paperclipai/adapter-utils/execution-target";
+import { isLinuxSandboxHost } from "../test-support/linux-sandbox-gate.js";
+
 
 // This file is a characterization test. It pins the engine boundary's CURRENT
 // behavior; it never changes production code. Each test states the observed
@@ -49,6 +51,11 @@ import {
   type AcpxEngineExecutorOptions,
 } from "./execute.js";
 import { runChildProcess } from "../server-utils.js";
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
 
 const tempRoots: string[] = [];
 
@@ -298,7 +305,7 @@ function remoteArgs(
   };
 }
 
-describe("composed ACPX run: engine-boundary result form per exit path", () => {
+describeLinuxSandbox("composed ACPX run: engine-boundary result form per exit path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -558,7 +565,7 @@ describe("composed ACPX run: engine-boundary result form per exit path", () => {
   });
 });
 
-describe("composed ACPX run: finalization set fires exactly once per exit path", () => {
+describeLinuxSandbox("composed ACPX run: finalization set fires exactly once per exit path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

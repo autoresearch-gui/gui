@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { isLinuxSandboxHost } from "./test-support/linux-sandbox-gate.js";
+
 
 import {
   getProcessSessionRemoteSource,
@@ -23,7 +25,12 @@ const execFile = promisify(execFileCallback);
 // a message. The host write was not atomic, so the poller could read an empty
 // or partial `.json` file. The poller deleted the file before it validated the
 // content, so an empty read was lost and a partial read stopped the loop.
-describe("stdin file race (parent PAP-4037)", () => {
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
+describeLinuxSandbox("stdin file race (parent PAP-4037)", () => {
   const cleanupDirs: string[] = [];
 
   afterEach(async () => {
@@ -867,7 +874,7 @@ describe("stdin file race (parent PAP-4037)", () => {
 // alive, the host must send no operating-system signal, and the host must
 // store no process identifier. These tests drive the real emitted wrapper as
 // a node process and, where noted, the real bridge through a local runner.
-describe("deterministic remote process-session wrapper shutdown (PAP-5316)", () => {
+describeLinuxSandbox("deterministic remote process-session wrapper shutdown (PAP-5316)", () => {
   const cleanupDirs: string[] = [];
 
   afterEach(async () => {

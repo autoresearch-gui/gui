@@ -21,6 +21,8 @@ import {
   startAdapterExecutionTargetPaperclipBridge,
   startAdapterExecutionTargetProcessSessionBridge,
 } from "@paperclipai/adapter-utils/execution-target";
+import { isLinuxSandboxHost } from "../test-support/linux-sandbox-gate.js";
+
 
 // Wrap the staging seam + both sandbox bridges in call-recording spies that
 // still delegate to the real implementations. A runner-backed sandbox test
@@ -47,6 +49,11 @@ import {
   type SandboxSyncOperation,
   type SandboxSyncResult,
 } from "../sandbox-managed-runtime.js";
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See ./test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
 
 const execFile = promisify(execFileCallback);
 const tempRoots: string[] = [];
@@ -287,7 +294,7 @@ function remoteArgs(
 // ===========================================================================
 // Layer A — engine teardown orchestration.
 // ===========================================================================
-describe("ACP settlement — Layer A: engine teardown orchestration", () => {
+describeLinuxSandbox("ACP settlement — Layer A: engine teardown orchestration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -828,7 +835,7 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-describe("ACP settlement — Layer B: restoreWorkspace order + native-sync selection", () => {
+describeLinuxSandbox("ACP settlement — Layer B: restoreWorkspace order + native-sync selection", () => {
   it("test_non_git_workspace_restore_phase_order_and_preserve_absent_via_tarball_fallback", async () => {
     // Model on sandbox-managed-runtime.test.ts "syncs workspace and assets through
     // a provider-neutral sandbox client" (~:342). A client that exposes only the
@@ -1025,7 +1032,7 @@ describe("ACP settlement — Layer B: restoreWorkspace order + native-sync selec
 // on the exit/cleanup path (mirrors execute.test.ts
 // test_remote_seam_teardown_fires_once_on_exit :2556).
 // ===========================================================================
-describe("ACP settlement — Layer C: per-adapter sync-back teardown fires once at the engine seam", () => {
+describeLinuxSandbox("ACP settlement — Layer C: per-adapter sync-back teardown fires once at the engine seam", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
