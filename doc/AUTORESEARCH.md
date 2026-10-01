@@ -148,21 +148,62 @@ A study therefore runs its baseline three times at setup, records the range as
 
 ## Run stability
 
-Two of seven baseline invocations failed with `exitCode 0xFFFFFFFF`, no Python
-traceback, and in one case an empty log - the signature of an external
-`TerminateProcess` rather than a crash inside the trainer. One died cleanly at
-step 28 of 33 with no error output at all.
+Two of seven baseline invocations died with `exitCode 0xFFFFFFFF`, no Python
+traceback, and in one case an empty log. One died cleanly at step 28 of 33 with
+no error output at all.
 
-That is roughly a 28% environmental failure rate on this machine, and it is the
-largest outstanding operational risk to an overnight study. `git` power settings
-already disable sleep on AC and hibernate entirely, so it is not sleep. The
-executor classifies these correctly - they settle as `crash` with the branch
-reset, and the study counts them in `consecutiveCrashes` - so they cost a run
-rather than corrupting the ledger. If the rate holds, the pulse's five-crash
-circuit breaker will stop the study rather than burn the night, which is the
-correct behaviour but means a machine that fails this often will not survive
-overnight unattended. Worth characterising before relying on it: run the baseline
-ten times and capture whether any produce a Python traceback at all.
+**That is the NVIDIA driver resetting, not the trainer crashing.** The correlation
+is exact:
+
+| Time | Event |
+| --- | --- |
+| 17:51:03 | Run 3 dies at step 28/33, no traceback |
+| 17:51:15 | `nvlddmkm` event 153 (Error) — and run 4 starts, dies in 10s, 0-byte log |
+| 17:51:26 | Second `nvlddmkm` event 153 |
+| 18:02:04 | Run 5 succeeds — the driver has recovered |
+
+The machine is bare metal (Gigabyte B650 AORUS, `PCI\VEN_10DE&DEV_2805`), so this
+is not a hypervisor artefact. Sleep is disabled on AC and hibernate is off, so it
+is not sleep. The driver is dated 2026-09-16, two weeks old, which makes a driver
+regression the most likely cause.
+
+### What the framework does about it
+
+An external kill and a genuine experiment failure are different facts, and
+conflating them is expensive in both directions:
+
+- A **Python traceback**, a `CUDA out of memory`, or a `FAIL:` line from
+  `train.py` is a finding about the idea under test. It is recorded as a crash,
+  the branch resets, and the crash counter advances.
+- **Anything else** — an empty log, steps printed then silence, a startup that died
+  before reaching training — is infrastructure. The idea is put back in `queued`
+  and re-dispatched, up to `maxTransientRetries` (default 3), and it does **not**
+  touch the crash circuit breaker. That breaker exists to catch a genuinely broken
+  setup, and spending its strikes on driver resets would stop a healthy study.
+
+The retry reuses the same row. A requeued experiment keeps its sequence number,
+its idea, and its commit, so `redispatchExperiment` puts it back in `running`
+rather than creating a fresh experiment - otherwise the retry budget would be
+consumed by new rows and the queued idea would be stranded forever.
+
+Transient failures are counted separately as `studies.transientFailures`, so an
+operator can see machine health without it being confused with research quality.
+
+**What is not solved:** a machine resetting the GPU this often will still not
+survive a night unattended, because a driver reset can also leave the card in a
+bad state for the following run, as run 4 shows. The framework makes each reset
+cost a retry instead of a wasted idea, but if the rate holds the study will spend
+most of its budget retrying. Worth trying before relying on it:
+
+- Update or roll back the NVIDIA driver. It is two weeks old and this is the most
+  likely cause.
+- Check for other GPU workloads. This box runs another project's Python jobs,
+  and any of them touching the card would contend with a training run.
+- Cap the GPU power limit. A reset under sustained load is frequently a power or
+  thermal excursion, and `nvidia-smi --query-gpu=power.draw,power.limit` is the
+  first thing to look at.
+- Raise `maxTransientRetries` if the resets are rare, or lower it if they are
+  constant, so the study gives up rather than retrying forever.
 
 ## The Windows cache path
 
@@ -236,6 +277,10 @@ the tracked `.gitignore`, which the agent can rewrite.
 
 ## Deliberate deviations from upstream
 
+- **A crash is detected by the absence of a usable metrics file**, not by a
+  language model reading a stack trace.
+- **An external kill is not a failed idea.** A GPU driver reset leaves no Python
+  traceback; that run is re-dispatched rather than adjudicated.
 - **VRAM is not a gate.** Upstream calls it a soft constraint, and `train.py`
   already self-regulates three times over (autotune rejects candidates above 90%
   of VRAM, the training loop falls back on OOM, the eval loop halves the batch). A

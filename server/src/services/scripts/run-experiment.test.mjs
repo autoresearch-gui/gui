@@ -14,7 +14,9 @@ import { test } from "node:test";
 
 import {
   buildChildEnv,
+  buildPayload,
   checkPlausibility,
+  classifyFailure,
   deriveMemoryGb,
   findModifiedForbiddenFiles,
   parseArgs,
@@ -621,4 +623,114 @@ test("stdout summary is one line of JSON carrying valBpb without the file", () =
   );
   assert.equal(failed.valBpb, null);
   assert.equal(failed.killedBy, "timeout");
+});
+
+// Failure classification.
+//
+// The distinction is load-bearing. A GPU driver reset killed two of seven Gate 0
+// baseline runs with exitCode 0xFFFFFFFF and no Python traceback, once
+// producing an entirely empty log, coinciding exactly with nvlddmkm event 153.
+// Recording those as failed experiments would discard hypotheses that never ran
+// and burn strikes against the crash circuit breaker, which exists to catch a
+// genuinely broken setup.
+const TB = (body) =>
+  `Traceback (most recent call last):\n  File "train.py", line 900, in main\n${body}`;
+
+test("classify: an empty log is infrastructure, because nothing ran", () => {
+  assert.equal(classifyFailure(""), "infrastructure");
+  assert.equal(classifyFailure("   \n"), "infrastructure");
+  assert.equal(classifyFailure(null), "infrastructure");
+  assert.equal(classifyFailure(undefined), "infrastructure");
+});
+
+test("classify: a Python traceback is an experiment failure", () => {
+  assert.equal(classifyFailure(TB("RuntimeError: something broke")), "experiment");
+  assert.equal(classifyFailure(TB("ValueError: bad shape")), "experiment");
+  assert.equal(classifyFailure(TB("KeyError: missing name")), "experiment");
+  assert.equal(classifyFailure(TB("AssertionError:")), "experiment");
+});
+
+test("classify: CUDA out of memory is an experiment failure", () => {
+  assert.equal(
+    classifyFailure("torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB"),
+    "experiment",
+  );
+  assert.equal(classifyFailure(TB("RuntimeError: CUDA out of memory")), "experiment");
+});
+
+test("classify: train.py FAIL: lines are findings about the configuration", () => {
+  assert.equal(
+    classifyFailure("Trying train candidate: batch_size=8\nFAIL: training failed for all batch size candidates."),
+    "experiment",
+  );
+  assert.equal(classifyFailure("FAIL: eval failed for all batch sizes."), "experiment");
+});
+
+test("classify: steps printed then nothing is infrastructure", () => {
+  // The real run 3 signature: clean training, then nothing at all.
+  assert.equal(
+    classifyFailure("step 00028 (80.6%) | loss: 3.528394 | lrm: 0.39 | tok/sec: 36855"),
+    "infrastructure",
+  );
+});
+
+test("classify: an ambiguous death defaults to infrastructure", () => {
+  // Retrying an ambiguous failure costs GPU time; discarding one throws away a
+  // hypothesis that never got to run, and the two are not recoverable alike.
+  assert.equal(
+    classifyFailure("GPU: NVIDIA GeForce RTX 4060 Ti\nTime budget: 300s\n"),
+    "infrastructure",
+  );
+  assert.equal(classifyFailure("Starting up\n"), "infrastructure");
+});
+
+const PAYLOAD_BASE = {
+  sequence: 1,
+  signal: null,
+  killedBy: null,
+  headBefore: "a".repeat(40),
+  headAfter: "a".repeat(40),
+  forbiddenFileModified: [],
+  plausibilityFailures: [],
+  parsed: null,
+  attestation: { wallClockSeconds: 1 },
+};
+
+test("payload: a successful run is never classified as a failure", () => {
+  const payload = buildPayload({
+    ...PAYLOAD_BASE,
+    exitCode: 0,
+    parsed: { ok: true, metrics: { valBpb: 1.0 }, provenance: {}, timeBudgetSeconds: 300 },
+    log: "",
+  });
+  assert.equal(payload.status, "succeeded");
+  assert.equal(payload.failureClass, "none");
+});
+
+test("payload: a driver reset is reported as infrastructure", () => {
+  const payload = buildPayload({
+    ...PAYLOAD_BASE,
+    sequence: 4,
+    // 0xFFFFFFFF, which is how Node reports a process TerminateProcess'd from
+    // outside on Windows.
+    exitCode: 4294967295,
+    attestation: { wallClockSeconds: 10.2 },
+    log: "",
+  });
+  assert.equal(payload.status, "invalid");
+  assert.equal(payload.invalidReason, "nonzero_exit");
+  assert.equal(payload.failureClass, "infrastructure");
+  assert.equal(payload.metrics, null);
+});
+
+test("payload: a moved worktree is not blamed on the idea", () => {
+  const payload = buildPayload({
+    ...PAYLOAD_BASE,
+    exitCode: 1,
+    headAfter: "b".repeat(40),
+    log: TB("RuntimeError: boom"),
+  });
+  assert.equal(payload.invalidReason, "worktree_head_moved");
+  // The tree moved, so the log describes code that is no longer the code.
+  assert.equal(payload.failureClass, "none");
 });

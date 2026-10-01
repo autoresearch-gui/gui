@@ -157,6 +157,23 @@ export function studyOrchestrator(db: Db, deps: OrchestratorDeps = {}) {
       .then((rows) => rows[0] ?? null);
 
     if (!running) {
+      // A requeued experiment goes first. It already holds a sequence number, an
+      // idea, and a commit, and its retry budget is finite. Promoting a NEW idea
+      // instead would let it sit in `queued` forever while the study silently
+      // stopped testing it.
+      const requeued = await db
+        .select({ id: experiments.id, sequence: experiments.sequence })
+        .from(experiments)
+        .where(
+          and(
+            eq(experiments.companyId, input.companyId),
+            eq(experiments.studyId, study.id),
+            eq(experiments.status, "queued"),
+          ),
+        )
+        .orderBy(experiments.sequence)
+        .then((rows) => rows[0] ?? null);
+
       const acquired = acquireGpuLock(paths.gpuLockFile, {
         ownerPid: process.pid,
         ttlSeconds: study.killAfterSec,
@@ -168,6 +185,19 @@ export function studyOrchestrator(db: Db, deps: OrchestratorDeps = {}) {
           name: "select_idea",
           acted: false,
           detail: `GPU slot held by pid ${acquired.heldBy?.pid ?? "another process"}`,
+        });
+      } else if (requeued) {
+        const redispatched = await experimentsSvc.redispatchExperiment(
+          input.companyId,
+          study.id,
+          requeued.id,
+        );
+        steps.push({
+          name: "select_idea",
+          acted: redispatched !== null,
+          detail: redispatched
+            ? `re-dispatched experiment #${redispatched.sequence} after a transient failure`
+            : `could not re-dispatch #${requeued.sequence}`,
         });
       } else {
         const winner = await ideasSvc.selectGpuWinner(input.companyId, study.id);

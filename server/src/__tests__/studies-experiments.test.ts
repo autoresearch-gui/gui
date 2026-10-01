@@ -98,6 +98,38 @@ function payloadWithValBpb(valBpb: number): Record<string, unknown> {
   return payload;
 }
 
+/**
+ * The payload the executor writes when a GPU driver reset killed the trainer.
+ * Measured on the target machine: `exitCode 0xFFFFFFFF` with no Python
+ * traceback, once producing an entirely empty log, coinciding exactly with
+ * `nvlddmkm` event 153. Nothing about the idea under test was established.
+ */
+function payloadForTransientKill(): Record<string, unknown> {
+  return {
+    status: "invalid",
+    sequence: 1,
+    // 0xFFFFFFFF, which is how Node reports a process TerminateProcess'd from
+    // outside on Windows.
+    exitCode: 4294967295,
+    signal: null,
+    killedBy: null,
+    invalidReason: "nonzero_exit",
+    failureClass: "infrastructure",
+    plausibilityFailures: [],
+    metrics: null,
+    provenance: {},
+    attestation: { executorVersion: "1", argv: [], wallClockSeconds: 10.2 },
+  };
+}
+
+/** The payload for a genuine crash: the trainer raised, and said so. */
+function payloadForExperimentCrash(): Record<string, unknown> {
+  return {
+    ...payloadForTransientKill(),
+    failureClass: "experiment",
+  };
+}
+
 /** Narrow an arbitration result, failing the test instead of a cast when it lost the GPU. */
 function acquired(result: BeginExperimentResult): ExperimentRow {
   if (!result.acquired) throw new Error("expected the GPU arbitration to succeed");
@@ -162,7 +194,11 @@ describeEmbeddedPostgres("study experiments service", () => {
    * written to the path the executor would have written it to and read back from disk.
    */
   async function seedStudy(
-    options: { noiseFloorBpb?: number | null; bestValBpb?: number | null } = {},
+    options: {
+      noiseFloorBpb?: number | null;
+      bestValBpb?: number | null;
+      maxTransientRetries?: number;
+    } = {},
   ): Promise<Harness> {
     const companyId = randomUUID();
     const agentId = randomUUID();
@@ -194,6 +230,7 @@ describeEmbeddedPostgres("study experiments service", () => {
       killAfterSec: 900,
       noiseFloorBpb: options.noiseFloorBpb === undefined ? 0.01 : options.noiseFloorBpb,
       bestValBpb: options.bestValBpb ?? null,
+      maxTransientRetries: options.maxTransientRetries ?? 3,
       exploreEveryN: 4,
       maxSimplificationKeepsPerWindow: 1,
       resultsTsvPath: paths.resultsTsv,
@@ -555,6 +592,133 @@ describeEmbeddedPostgres("study experiments service", () => {
     expect(persisted?.status).toBe("succeeded");
     expect(persisted?.valBpb).toBeCloseTo(0.99, 10);
     expect(persisted?.errorExcerpt).toBeNull();
+  });
+
+  it("requeues an experiment killed by infrastructure instead of discarding the idea", async () => {
+    // A GPU driver reset killed the trainer from outside. Nothing about the idea
+    // was established, so it must not be consumed, and it must not advance the
+    // crash circuit breaker that exists to catch a genuinely broken setup.
+    const harness = await seedStudy();
+    const experiment = acquired(
+      await harness.service.beginExperiment({
+        companyId: harness.companyId,
+        studyId: harness.studyId,
+        kind: "hypothesis",
+        description: "wider rotary schedule",
+        gitSha: "7".repeat(40),
+      }),
+    );
+    await writeMetrics(harness, experiment.sequence, payloadForTransientKill());
+
+    const settled = await harness.service.settleFromRun({
+      companyId: harness.companyId,
+      studyId: harness.studyId,
+      runId: null,
+      outcome: "failed",
+      error: "Process exited with code 4294967295",
+    });
+
+    expect(settled.settled).toBe(true);
+    expect(settled.requeued).toBe(true);
+    expect(settled.experiment?.status).toBe("queued");
+    expect(settled.experiment?.valBpb).toBeNull();
+    expect(settled.experiment?.transientAttempts).toBe(1);
+    // The sequence number is not released, so the retry is the same experiment.
+    expect(settled.experiment?.sequence).toBe(experiment.sequence);
+    // Nothing was decided, so there is no verdict to audit yet.
+    expect(settled.experiment?.verdict).toBeNull();
+
+    const study = await studyRow(harness.studyId);
+    expect(study?.transientFailures).toBe(1);
+    expect(study?.consecutiveCrashes).toBe(0);
+    expect(study?.crashCount).toBe(0);
+  });
+
+  it("still records a crash when the failure was the experiment's own fault", async () => {
+    const harness = await seedStudy();
+    const experiment = acquired(
+      await harness.service.beginExperiment({
+        companyId: harness.companyId,
+        studyId: harness.studyId,
+        kind: "hypothesis",
+        description: "raises a ValueError",
+        gitSha: "8".repeat(40),
+      }),
+    );
+    await writeMetrics(harness, experiment.sequence, payloadForExperimentCrash());
+
+    const settled = await harness.service.settleFromRun({
+      companyId: harness.companyId,
+      studyId: harness.studyId,
+      runId: null,
+      outcome: "failed",
+      error: "ValueError: bad shape",
+    });
+
+    expect(settled.requeued).toBeUndefined();
+    expect(settled.experiment?.status).toBe("crashed");
+    expect(settled.experiment?.transientAttempts).toBe(0);
+    expect((await studyRow(harness.studyId))?.transientFailures).toBe(0);
+  });
+
+  it("stops retrying infrastructure kills once the budget is spent", async () => {
+    // Otherwise a permanently broken machine re-dispatches the same run all
+    // night and the study never learns anything at all.
+    const harness = await seedStudy({ maxTransientRetries: 2 });
+    const experiment = acquired(
+      await harness.service.beginExperiment({
+        companyId: harness.companyId,
+        studyId: harness.studyId,
+        kind: "hypothesis",
+        description: "retried too many times",
+        gitSha: "9".repeat(40),
+      }),
+    );
+    await writeMetrics(harness, experiment.sequence, payloadForTransientKill());
+
+    const settleOnce = async () => {
+      await writeMetrics(harness, experiment.sequence, payloadForTransientKill());
+      return harness.service.settleFromRun({
+        companyId: harness.companyId,
+        studyId: harness.studyId,
+        runId: null,
+        outcome: "failed",
+        error: "driver reset",
+      });
+    };
+
+    /** Puts the row back in running, exactly as the pulse does before a retry. */
+    const retry = async () => {
+      const running = await harness.service.redispatchExperiment(
+        harness.companyId,
+        harness.studyId,
+        experiment.id,
+      );
+      expect(running?.status).toBe("running");
+      return settleOnce();
+    };
+
+    // The first attempt runs on the row beginExperiment already started.
+    const first = await settleOnce();
+    expect(first.requeued).toBe(true);
+    expect(first.experiment?.transientAttempts).toBe(1);
+
+    // The second retry is still within the budget of 2.
+    const second = await retry();
+    expect(second.requeued).toBe(true);
+    expect(second.experiment?.transientAttempts).toBe(2);
+
+    // The third exhausts it and becomes a real crash, so the study can move on
+    // instead of retrying the same run all night.
+    const final = await retry();
+    expect(final.requeued).toBeUndefined();
+    expect(final.experiment?.status).toBe("crashed");
+    expect(final.experiment?.transientAttempts).toBe(2);
+    expect((await studyRow(harness.studyId))?.transientFailures).toBe(2);
+    // Only one experiment row was ever created: each retry reused it rather than
+    // consuming another sequence number. nextSequence is one past the maximum,
+    // so a value of sequence+1 proves no second row exists.
+    expect(await harness.service.nextSequence(harness.studyId)).toBe(experiment.sequence + 1);
   });
 
   it("leaves valBpb null on a crash settle instead of writing the 0.000000 sentinel", async () => {

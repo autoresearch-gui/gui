@@ -74,6 +74,13 @@ export const studies = pgTable(
     crashCount: integer("crash_count").notNull().default(0),
     consecutiveCrashes: integer("consecutive_crashes").notNull().default(0),
     consecutiveDiscards: integer("consecutive_discards").notNull().default(0),
+    /**
+     * Runs killed from outside - a GPU driver reset, a lost CUDA context, a
+     * power event. Counted separately from `consecutiveCrashes` because these
+     * say nothing about the idea under test and must not advance the crash
+     * circuit breaker.
+     */
+    transientFailures: integer("transient_failures").notNull().default(0),
     lastKeptSha: text("last_kept_sha"),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
     resultsTsvPath: text("results_tsv_path"),
@@ -82,6 +89,13 @@ export const studies = pgTable(
     exploreEveryN: integer("explore_every_n").notNull().default(4),
     minOpenIdeas: integer("min_open_ideas").notNull().default(4),
     maxCrashRetriesPerIdea: integer("max_crash_retries_per_idea").notNull().default(2),
+    /**
+     * How many times one experiment may be re-dispatched after an
+     * infrastructure kill before it is recorded as a genuine crash. Three is
+     * enough to ride out a driver reset without letting a permanently broken
+     * machine loop the same run all night.
+     */
+    maxTransientRetries: integer("max_transient_retries").notNull().default(3),
     maxSimplificationKeepsPerWindow: integer("max_simplification_keeps_per_window").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
@@ -194,6 +208,13 @@ export const experiments = pgTable(
     activationCheckpointing: boolean("activation_checkpointing"),
     dataset: text("dataset"),
     autotuneCold: boolean("autotune_cold").notNull().default(false),
+    /**
+     * How many times this experiment was killed by infrastructure rather than by
+     * its own code. The executor classifies a death with no Python traceback as
+     * infrastructure, and those runs are re-dispatched instead of being recorded
+     * as a failed idea, until `maxTransientRetries` is spent.
+     */
+    transientAttempts: integer("transient_attempts").notNull().default(0),
     autotuneSelectedBatchSize: integer("autotune_selected_batch_size"),
     metricsJson: jsonb("metrics_json").$type<Record<string, unknown>>(),
     provenance: jsonb("provenance").$type<Record<string, unknown>>(),

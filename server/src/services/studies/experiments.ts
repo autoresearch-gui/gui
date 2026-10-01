@@ -153,6 +153,12 @@ export interface SettleFromRunResult {
   experiment: ExperimentRow | null;
   /** Set when the run reported success but the executor's payload was not usable. */
   metricsRejection: string | null;
+  /**
+   * True when the run was killed by infrastructure and put back in `queued` for
+   * another attempt rather than adjudicated. The idea is deliberately not
+   * consumed, because nothing about it was tested.
+   */
+  requeued?: boolean;
 }
 
 export interface ReconcileOrphansOptions {
@@ -284,6 +290,29 @@ export function experimentsService(db: Db, deps: ExperimentsServiceDeps = {}) {
   const readMetricsJson = deps.readMetricsJson ?? defaultReadMetricsJson;
   const writeResultsTsv = deps.writeResultsTsv ?? writeResultsTsvAtomic;
   const ensureDir = deps.ensureDir ?? ((dirPath: string) => void mkdirSync(dirPath, { recursive: true }));
+
+  /**
+   * Reads the executor's own verdict on why a run died.
+   *
+   * The executor sees the whole log and is the only component that can tell an
+   * external kill from a genuine crash, so its classification is trusted rather
+   * than re-derived here. Anything the executor did not write is treated as an
+   * experiment failure: re-running on a guess risks looping a genuinely broken
+   * setup all night, and `maxTransientRetries` bounds the damage either way.
+   */
+  function executorFailureClass(
+    study: StudyRow,
+    experiment: ExperimentRow,
+  ): "infrastructure" | "experiment" | "unknown" {
+    const metricsFile = studyMetricsFile(
+      { repoPath: study.repoPath, tag: study.tag },
+      experiment.sequence,
+    );
+    const payload = readMetricsJson(metricsFile);
+    const classified = optionalText(jsonRecord(payload)?.failureClass);
+    if (classified === "infrastructure" || classified === "experiment") return classified;
+    return "unknown";
+  }
 
   async function loadStudy(companyId: string, studyId: string): Promise<StudyRow> {
     const study = await db
@@ -420,6 +449,46 @@ export function experimentsService(db: Db, deps: ExperimentsServiceDeps = {}) {
     });
 
     return { acquired: true, experiment: inserted };
+  }
+
+  /**
+   * Puts a requeued experiment back in `running` so the same row is retried.
+   *
+   * A requeued experiment keeps its sequence number, its idea, and its commit, so
+   * the retry has to be the SAME row. Creating a fresh experiment instead would
+   * consume a second sequence number and strand the requeued one in `queued`
+   * forever, so the study would quietly stop testing the idea it had queued.
+   *
+   * Clears `finishedAt` and takes a fresh `startedAt` so the orphan reconciler's
+   * age cutoff measures this attempt rather than the dead one.
+   */
+  async function redispatchExperiment(
+    companyId: string,
+    studyId: string,
+    experimentId: string,
+  ): Promise<ExperimentRow | null> {
+    const timestamp = now();
+    const updated = await db
+      .update(experiments)
+      .set({
+        status: "running",
+        heartbeatRunId: null,
+        startedAt: timestamp,
+        finishedAt: null,
+      })
+      .where(
+        and(
+          eq(experiments.companyId, companyId),
+          eq(experiments.studyId, studyId),
+          eq(experiments.id, experimentId),
+          eq(experiments.status, "queued"),
+        ),
+      )
+      .returning()
+      .then((rows) => rows[0] ?? null);
+    if (!updated) return null;
+    await touchStudy(companyId, studyId, timestamp);
+    return updated;
   }
 
   /**
@@ -579,6 +648,83 @@ export function experimentsService(db: Db, deps: ExperimentsServiceDeps = {}) {
 
     if (input.outcome !== "succeeded") {
       const cause = excerpt(input.error) ?? `run ${input.outcome} before producing a val_bpb`;
+
+      // A death with no Python traceback came from outside the trainer: a GPU
+      // driver reset, a lost CUDA context, a power event. Recorded on the target
+      // machine as nvlddmkm event 153 killing a run mid-step, once producing an
+      // empty log entirely. That says nothing about the idea under test, so
+      // re-dispatch the same experiment rather than recording a failed
+      // hypothesis - and do not let it advance the crash circuit breaker, which
+      // exists to catch a genuinely broken setup.
+      const failureClass = executorFailureClass(study, experiment);
+      const attempts = experiment.transientAttempts + 1;
+      const retryable =
+        failureClass === "infrastructure" && attempts <= study.maxTransientRetries;
+
+      if (retryable) {
+        const requeued = await db
+          .update(experiments)
+          .set({
+            // Back to queued rather than a terminal status, so the experiment is
+            // still the one holding the sequence number and the idea is not
+            // consumed. `adjudicatedAt` stays null because nothing was decided.
+            status: "queued",
+            heartbeatRunId: null,
+            errorExcerpt: excerpt(`transient infrastructure failure: ${cause}`),
+            transientAttempts: attempts,
+            startedAt: null,
+            finishedAt: null,
+          })
+          .where(
+            and(
+              eq(experiments.companyId, input.companyId),
+              eq(experiments.id, experiment.id),
+              eq(experiments.status, experiment.status),
+            ),
+          )
+          .returning()
+          .then((rows) => rows[0] ?? null);
+        if (!requeued) return { settled: false, experiment, metricsRejection: null };
+
+        // Counted separately from the crash streak. This is a machine-health
+        // signal an operator wants to see, but it must not trip the crash
+        // circuit breaker, which exists to catch a genuinely broken setup.
+        await db
+          .update(studies)
+          .set({
+            transientFailures: sql`${studies.transientFailures} + 1`,
+            lastActivityAt: timestamp,
+            updatedAt: timestamp,
+          })
+          .where(and(eq(studies.companyId, input.companyId), eq(studies.id, input.studyId)));
+        await touchStudy(input.companyId, input.studyId, timestamp);
+        await logActivity(db, {
+          companyId: input.companyId,
+          actorType: actor.actorType,
+          actorId: actor.actorId,
+          agentId: actor.agentId ?? null,
+          runId: actor.runId ?? input.runId,
+          action: "study.experiment_requeued_after_transient_failure",
+          entityType: "experiment",
+          entityId: requeued.id,
+          issueId: requeued.issueId,
+          details: {
+            studyId: input.studyId,
+            sequence: requeued.sequence,
+            outcome: input.outcome,
+            failureClass,
+            attempt: attempts,
+            maxTransientRetries: study.maxTransientRetries,
+          },
+        });
+        return {
+          settled: true,
+          experiment: requeued,
+          metricsRejection: null,
+          requeued: true,
+        };
+      }
+
       const updated = await settleAsTerminal(
         input,
         experiment,
@@ -1079,6 +1225,7 @@ export function experimentsService(db: Db, deps: ExperimentsServiceDeps = {}) {
   return {
     nextSequence,
     beginExperiment,
+    redispatchExperiment,
     reconcileOrphans,
     settleFromRun,
     adjudicate,

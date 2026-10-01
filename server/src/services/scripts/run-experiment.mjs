@@ -1041,6 +1041,50 @@ export function summarizeForStdout(payload) {
 }
 
 /**
+ * Classifies a run that produced no metric.
+ *
+ * The distinction is not cosmetic. A GPU driver reset, a lost CUDA context, or a
+ * machine-level power event kills the trainer from outside: the process dies
+ * with a nonzero exit and no Python traceback, sometimes before it writes a
+ * single byte. That says nothing about the idea under test, and treating it as a
+ * failed experiment would discard a hypothesis that never got to run while also
+ * burning a strike against the crash circuit breaker.
+ *
+ * A genuine experiment failure - an out-of-memory error, a shape mismatch, a
+ * reference to a name that does not exist - leaves a Python traceback in the log.
+ * That is a real result about the idea and is recorded as one.
+ *
+ * Observed on the target machine: two of seven baseline runs died this way,
+ * coinciding exactly with `nvlddmkm` event 153 from the NVIDIA driver.
+ *
+ * @param {string | null} log the full captured stdout+stderr
+ * @returns {"infrastructure" | "experiment" | "none"}
+ */
+export function classifyFailure(log) {
+  if (typeof log !== "string" || log.trim() === "") {
+    // Nothing at all was written, so the process died before it could even
+    // initialise. Nothing ran, so nothing about the idea is disproven.
+    return "infrastructure";
+  }
+  // An explicit Python failure is a real result about the idea under test.
+  if (/Traceback \(most recent call last\)/.test(log)) return "experiment";
+  if (/torch\.cuda\.OutOfMemoryError|CUDA out of memory/i.test(log)) return "experiment";
+  if (/^\s*(RuntimeError|ValueError|TypeError|KeyError|IndexError|AttributeError|AssertionError)\b/m.test(log)) {
+    return "experiment";
+  }
+  // `train.py` reports its own give-up conditions as FAIL: lines, which are
+  // genuine findings about the configuration rather than external interference.
+  if (/^\s*FAIL:/m.test(log)) return "experiment";
+
+  // Everything else defaults to infrastructure, deliberately. The trainer
+  // printed steps and then vanished, or died during startup, or the log is
+  // simply truncated by whatever killed it. Retrying an ambiguous failure costs
+  // GPU time; discarding one throws away a hypothesis that never got to run, and
+  // the two errors are not recoverable the same way.
+  return "infrastructure";
+}
+
+/**
  * Assemble the final payload, applying the usability contract.
  *
  * "Usable" is exit code 0, a fully parsed block, no `invalidReason`, and an
@@ -1076,6 +1120,13 @@ export function buildPayload(input) {
 
   const status = invalidReason === null && input.plausibilityFailures.length === 0 ? "succeeded" : "invalid";
 
+  // Only a run that produced no metric can be classified. A run that reached a
+  // verdict is about the idea, whatever else happened.
+  const failureClass =
+    status === "invalid" && (invalidReason === "nonzero_exit" || invalidReason === "parse_failure")
+      ? classifyFailure(input.log)
+      : "none";
+
   return {
     status,
     sequence: input.sequence,
@@ -1083,6 +1134,7 @@ export function buildPayload(input) {
     signal: input.signal,
     killedBy: input.killedBy,
     invalidReason,
+    failureClass,
     plausibilityFailures: input.plausibilityFailures,
     metrics: status === "succeeded" || metrics !== null ? metrics : null,
     provenance,
@@ -1281,6 +1333,7 @@ export async function main(argv = process.argv.slice(2)) {
     plausibilityFailures: failures,
     parsed: parsed.ok === true ? parsed : null,
     attestation,
+    log,
   });
 
   try {
