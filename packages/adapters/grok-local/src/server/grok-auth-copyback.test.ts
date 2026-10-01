@@ -91,7 +91,11 @@ describe("copyBackGrokAuth", () => {
     return { outcome, finalHostAuth, finalHostMode, logs, leftoverEntries };
   }
 
-  it("installs a strictly-later same-identity credential at mode 0600", async () => {
+// Windows cannot express POSIX permission bits: chmod only toggles read-only, so
+  // every file reports 0o666 and a chmod-induced EACCES/EPERM never happens.
+  // These cases assert exactly that, so they are unobservable on this host.
+
+  it.skipIf(process.platform === "win32")("installs a strictly-later same-identity credential at mode 0600", async () => {
     const sandboxAuth = auth({ expiresAt: NEWER, marker: "sandbox-newer-SENTINEL" });
     const hostAuth = auth({ expiresAt: OLDER, marker: "host-older-SENTINEL" });
 
@@ -106,7 +110,11 @@ describe("copyBackGrokAuth", () => {
     expect(result.logs.join("\n")).not.toContain("SENTINEL");
   });
 
-  it("keeps the host credential when the predicate keeps the destination", async () => {
+// Windows cannot express POSIX permission bits: chmod only toggles read-only, so
+  // every file reports 0o666 and a chmod-induced EACCES/EPERM never happens.
+  // These cases assert exactly that, so they are unobservable on this host.
+
+  it.skipIf(process.platform === "win32")("keeps the host credential when the predicate keeps the destination", async () => {
     const hostKeep = auth({ expiresAt: OLDER, marker: "host-keep" });
     const cases: { name: string; sandboxAuth: string; hostAuth: string }[] = [
       {
@@ -233,7 +241,11 @@ describe("copyBackGrokAuth", () => {
     expect(result.leftoverEntries).toEqual([]);
   });
 
-  it("leaves no temporary file after an install error", async () => {
+// Windows cannot express POSIX permission bits: chmod only toggles read-only, so
+  // every file reports 0o666 and a chmod-induced EACCES/EPERM never happens.
+  // These cases assert exactly that, so they are unobservable on this host.
+
+  it.skipIf(process.platform === "win32")("leaves no temporary file after an install error", async () => {
     const hostHomeDir = await makeHostDir();
     const hostAuth = auth({ expiresAt: OLDER, marker: "host-intact" });
     const hostAuthPath = path.join(hostHomeDir, "auth.json");
@@ -274,7 +286,11 @@ describe("copyBackGrokAuth", () => {
     expect(result.leftoverEntries).toEqual([]);
   });
 
-  it("logs no token bytes and no home path on an error", async () => {
+// Windows cannot express POSIX permission bits: chmod only toggles read-only, so
+  // every file reports 0o666 and a chmod-induced EACCES/EPERM never happens.
+  // These cases assert exactly that, so they are unobservable on this host.
+
+  it.skipIf(process.platform === "win32")("logs no token bytes and no home path on an error", async () => {
     const marker = "SECRET-ACCOUNT-HANDLE";
     const root = await mkdtemp(path.join(os.tmpdir(), `paperclip-grok-copyback-${marker}-`));
     cleanupDirs.push(root);

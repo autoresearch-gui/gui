@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import type { AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import type { AdapterExecutionTarget } from "@paperclipai/adapter-utils/execution-target";
+import { isLinuxSandboxHost } from "@paperclipai/adapter-utils/test-support/linux-sandbox-gate";
+
 
 // A shared handle so each test can set the stub Claude hello-probe output the
 // sandbox runner returns.
@@ -97,6 +99,11 @@ afterEach(() => {
   probeResult.value = { exitCode: 1, stdout: "", stderr: "", timedOut: false };
   probeResult.throwError = null;
 });
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See adapter-utils/src/test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
 
 describe("mapClaudeAcpAuthErrorCode", () => {
   it("translates the generic acpx_auth_required code into claude_auth_required", () => {
@@ -387,7 +394,7 @@ describe("probeClaudeAcpSandboxLogin", () => {
   });
 });
 
-describe("Claude ACP hello probe on local and SSH targets", () => {
+describeLinuxSandbox("Claude ACP hello probe on local and SSH targets", () => {
   const sshTarget: AdapterExecutionTarget = {
     kind: "remote",
     transport: "ssh",

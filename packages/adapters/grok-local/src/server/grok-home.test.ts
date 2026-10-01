@@ -46,7 +46,11 @@ describe("stageGrokHomeForSync", () => {
     );
   });
 
-  it("creates the staged directory with mode 0700", async () => {
+// Windows cannot express POSIX permission bits: chmod only toggles read-only, so
+  // every file reports 0o666 and a chmod-induced EACCES/EPERM never happens.
+  // These cases assert exactly that, so they are unobservable on this host.
+
+  it.skipIf(process.platform === "win32")("creates the staged directory with mode 0700", async () => {
     const root = await makeRoot("paperclip-grok-stage-dir-");
     const home = path.join(root, "grok-home");
     await fs.mkdir(home, { recursive: true });
@@ -59,7 +63,11 @@ describe("stageGrokHomeForSync", () => {
     expect(mode).toBe(0o700);
   });
 
-  it("writes the staged auth.json with mode 0600", async () => {
+// Windows cannot express POSIX permission bits: chmod only toggles read-only, so
+  // every file reports 0o666 and a chmod-induced EACCES/EPERM never happens.
+  // These cases assert exactly that, so they are unobservable on this host.
+
+  it.skipIf(process.platform === "win32")("writes the staged auth.json with mode 0600", async () => {
     const root = await makeRoot("paperclip-grok-stage-mode-");
     const home = path.join(root, "grok-home");
     await fs.mkdir(home, { recursive: true });

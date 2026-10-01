@@ -173,7 +173,10 @@ describe("codex auth cache store", () => {
       expect(entryPath.endsWith(path.join("acct-ok", "auth.json"))).toBe(true);
     });
 
-    it("ensureCodexAuthCacheEntryDir creates the cache root and the entry directory private (0700)", async () => {
+    // Windows has no POSIX permission bits: `chmod` only toggles the read-only
+    // attribute, so `stat().mode & 0o777` is 0o666 whatever the code did. The
+    // cache root is still created; only the 0700 assertion is unobservable here.
+    it.skipIf(process.platform === "win32")("ensureCodexAuthCacheEntryDir creates the cache root and the entry directory private (0700)", async () => {
       const home = await makeInstanceRoot();
       const env = envFor(home);
       const entryPath = await ensureCodexAuthCacheEntryDir(env, "acct-priv", "company-a");

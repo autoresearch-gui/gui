@@ -5,6 +5,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AdapterExecutionContext, AdapterInvocationMeta } from "@paperclipai/adapter-utils";
 import { runChildProcess } from "@paperclipai/adapter-utils/server-utils";
+import { isLinuxSandboxHost } from "@paperclipai/adapter-utils/test-support/linux-sandbox-gate";
+
 
 // Every test in this file needs a real teardown, so the mock below delegates
 // to the actual factory by default. Only the wiring test further down reads
@@ -288,7 +290,12 @@ function buildContext(root: string, overrides: Partial<AdapterExecutionContext> 
   };
 }
 
-describe("codex_local ACP lane", () => {
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See adapter-utils/src/test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
+describeLinuxSandbox("codex_local ACP lane", () => {
   it("keeps ACP selected and reports unavailable prerequisites for default and explicit engines", async () => {
     const root = await makeTempRoot("paperclip-codex-acp-default-");
     const commandPath = path.join(root, "bin", "codex-acp");

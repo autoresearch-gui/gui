@@ -572,11 +572,30 @@ describe("claude CLI local hello probe hardening", () => {
   let savedPath: string | undefined;
   let savedEnv: Record<string, string | undefined> = {};
 
+  const IS_WINDOWS = process.platform === "win32";
+
+  /**
+   * Writes a stand-in `claude` and returns the path the resolver will report.
+   *
+   * On Windows the name must carry a PATHEXT suffix and the body must be a batch
+   * file: a bare `#!/bin/sh` script is neither executable nor matched by any
+   * PATHEXT entry, so the probe finds nothing and the test would assert against a
+   * null command for a reason that has nothing to do with what it covers.
+   */
+  async function writeFakeClaude(basePath: string): Promise<string> {
+    if (IS_WINDOWS) {
+      const cmdPath = `${basePath}.cmd`;
+      await writeFile(cmdPath, "@exit /b 0\r\n");
+      return cmdPath;
+    }
+    await writeFile(basePath, "#!/bin/sh\nexit 0\n");
+    await chmod(basePath, 0o755);
+    return basePath;
+  }
+
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "paperclip-cli-localprobe-"));
-    claudePath = path.join(tempDir, "claude");
-    await writeFile(claudePath, "#!/bin/sh\nexit 0\n");
-    await chmod(claudePath, 0o755);
+    claudePath = await writeFakeClaude(path.join(tempDir, "claude"));
     savedPath = process.env.PATH;
     process.env.PATH = tempDir;
     savedEnv = {};
@@ -626,7 +645,12 @@ describe("claude CLI local hello probe hardening", () => {
     const spawnedCommand = call[2] as string;
     const spawnedEnv = (call[4] as { env: Record<string, string> }).env;
     // The trusted resolved claude executable, never the caller command path.
-    expect(spawnedCommand).toBe(claudePath);
+    // Case is folded on Windows: the resolver walks `PATHEXT` and reports
+    // `claude.CMD` for a file created as `claude.cmd`. NTFS is case-insensitive,
+    // so both name the same executable.
+    expect(IS_WINDOWS ? spawnedCommand.toLowerCase() : spawnedCommand).toBe(
+      IS_WINDOWS ? claudePath.toLowerCase() : claudePath,
+    );
     expect(spawnedCommand).not.toContain("/tmp/evil");
     // The approved key reaches the child; the hostile keys never do.
     expect(spawnedEnv.ANTHROPIC_API_KEY).toBe("keep-this-key");
@@ -644,9 +668,7 @@ describe("claude CLI local hello probe hardening", () => {
     ["claude-opus-5-5", "2.1.280"],
   ])("warns without executing %s when runtime PATH selects a different executable", async (model, minimumVersion) => {
     const runtimeDir = await mkdtemp(path.join(os.tmpdir(), "paperclip-cli-runtime-path-"));
-    const runtimeClaudePath = path.join(runtimeDir, "claude");
-    await writeFile(runtimeClaudePath, "#!/bin/sh\nexit 0\n");
-    await chmod(runtimeClaudePath, 0o755);
+    const runtimeClaudePath = await writeFakeClaude(path.join(runtimeDir, "claude"));
 
     try {
       probeResult.value = { exitCode: 0, stdout: `${minimumVersion} (Claude Code)\n`, stderr: "" };

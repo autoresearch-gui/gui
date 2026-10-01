@@ -2,6 +2,8 @@ import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { isLinuxSandboxHost } from "@paperclipai/adapter-utils/test-support/linux-sandbox-gate";
+
 
 import type { SandboxManagedRuntimeAsset } from "@paperclipai/adapter-utils/sandbox-managed-runtime";
 
@@ -83,7 +85,12 @@ prepareAdapterExecutionTargetRuntime.mockImplementation(async (input: { assets?:
   };
 });
 
-describe("codex execute — outbound auth copy-back restore contribution", () => {
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See adapter-utils/src/test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
+describeLinuxSandbox("codex execute — outbound auth copy-back restore contribution", () => {
   const cleanupDirs: string[] = [];
   let savedCodexHomeEnv: string | undefined;
 

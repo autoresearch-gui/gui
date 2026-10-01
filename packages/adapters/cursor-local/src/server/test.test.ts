@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { runChildProcess } from "@paperclipai/adapter-utils/server-utils";
 import { SANDBOX_INSTALL_COMMAND } from "../index.js";
 import { testEnvironment } from "./test.js";
+import { isLinuxSandboxHost } from "@paperclipai/adapter-utils/test-support/linux-sandbox-gate";
+
 
 function buildFakeAgentScript(): string {
   return `#!/bin/sh
@@ -69,7 +71,12 @@ function createSandboxRunner(options: { homeDir: string; installCommandPath: str
   };
 }
 
-describe("cursor testEnvironment", () => {
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See adapter-utils/src/test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
+describeLinuxSandbox("cursor testEnvironment", () => {
   it("shows the probe failure after an informational retrieval trace notice", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-cursor-probe-diagnostic-"));
     const command = path.join(root, "agent");

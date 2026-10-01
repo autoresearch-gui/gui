@@ -2,6 +2,8 @@ import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } 
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { isLinuxSandboxHost } from "@paperclipai/adapter-utils/test-support/linux-sandbox-gate";
+
 
 import { copyBackCodexAuth } from "./codex-auth-copyback.js";
 import {
@@ -19,7 +21,12 @@ import { resolveSharedCodexHomeDir } from "./codex-home.js";
 // (keep destination) means "leave the host credential untouched". This suite
 // drives the REAL `.cjs` through the module (no stub predicate) against a real
 // host tmp filesystem, injecting only the sandbox read.
-describe("copyBackCodexAuth", () => {
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See adapter-utils/src/test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
+describeLinuxSandbox("copyBackCodexAuth", () => {
   const cleanupDirs: string[] = [];
 
   afterEach(async () => {
@@ -326,7 +333,7 @@ describe("copyBackCodexAuth", () => {
 // independently. This suite drives the real `.cjs` predicate (default mode for
 // the host store, seed mode for the cache slot) against a real host tmp
 // filesystem.
-describe("copyBackCodexAuth identity-keyed cache write", () => {
+describeLinuxSandbox("copyBackCodexAuth identity-keyed cache write", () => {
   const cleanupDirs: string[] = [];
   const COMPANY_ID = "company-a";
 

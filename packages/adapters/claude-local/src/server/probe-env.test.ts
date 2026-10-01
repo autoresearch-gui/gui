@@ -6,13 +6,37 @@ import { buildLocalAdapterTestProbeEnv } from "./probe-env.js";
 
 const tempDirs: string[] = [];
 
+const IS_WINDOWS = process.platform === "win32";
+
 async function makeTrustedPathWithClaude(): Promise<{ dir: string; claudePath: string }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "paperclip-probe-env-"));
   tempDirs.push(dir);
-  const claudePath = path.join(dir, "claude");
-  await writeFile(claudePath, "#!/bin/sh\nexit 0\n");
-  await chmod(claudePath, 0o755);
+  // The stand-in must be something the host can actually resolve. The resolver
+  // walks `PATHEXT` on Windows and requires `X_OK` elsewhere, so a bare
+  // `#!/bin/sh` file named `claude` is invisible on Windows - it is neither
+  // executable there nor matched by any PATHEXT suffix. Using `claude.cmd` keeps
+  // the fixture honest and exercises the Windows PATHEXT branch for real.
+  const claudePath = path.join(dir, IS_WINDOWS ? "claude.cmd" : "claude");
+  await writeFile(claudePath, IS_WINDOWS ? "@exit /b 0\r\n" : "#!/bin/sh\nexit 0\n");
+  if (!IS_WINDOWS) await chmod(claudePath, 0o755);
   return { dir, claudePath };
+}
+
+/**
+ * Compares a resolved command against the fixture path.
+ *
+ * The Windows resolver appends suffixes in PATHEXT order, so it reports
+ * `claude.CMD` for a file created as `claude.cmd`. NTFS is case-insensitive, so
+ * both name the same file and the comparison folds case there only.
+ */
+function expectSameCommand(actual: string | null, expected: string) {
+  if (actual === null) {
+    expect(actual).toBe(expected);
+    return;
+  }
+  expect(IS_WINDOWS ? actual.toLowerCase() : actual).toBe(
+    IS_WINDOWS ? expected.toLowerCase() : expected,
+  );
 }
 
 afterEach(async () => {
@@ -29,7 +53,7 @@ describe("buildLocalAdapterTestProbeEnv", () => {
       callerEnv: { PATH: "/hostile/bin", Path: "/hostile/bin", command: "/tmp/evil/claude" },
       trustedEnv: { PATH: dir },
     });
-    expect(built.command).toBe(claudePath);
+    expectSameCommand(built.command, claudePath);
     expect(built.env.PATH).toBeUndefined();
     expect(built.env.Path).toBeUndefined();
   });

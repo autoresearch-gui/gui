@@ -66,7 +66,9 @@ describe("codex inactivity monitor (integration: real subprocess)", () => {
     10_000,
   );
 
-  it(
+  // Same gate as the sibling test above: this asserts on POSIX process-group kills
+  // and termination signals, which have no Windows equivalent.
+  it.skipIf(process.platform !== "linux")(
     "kills a codex child that goes silent after one event and surfaces a monitor failure",
     async () => {
       const runId = `monitor-integration-${Date.now()}`;

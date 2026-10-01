@@ -7,6 +7,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { classifyClaudeTerminalSessionFailure, createClaudeAcpExecutor } from "./acp.js";
 import type { AcpxEngineExecutorOptions } from "@paperclipai/adapter-utils/acpx-engine/execute";
 import { parseAcpxStdoutLine } from "@paperclipai/adapter-utils/acpx-engine/ui";
+import { isLinuxSandboxHost } from "@paperclipai/adapter-utils/test-support/linux-sandbox-gate";
+
 
 const repoRoot = fileURLToPath(new URL("../../../../..", import.meta.url));
 const fixture = path.join(repoRoot, "scripts/mcp-fixtures/servers/acp-echo-agent.mjs");
@@ -57,7 +59,12 @@ async function executeFailure(
   return { result, logs: logs.join("\n") };
 }
 
-it.each([
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See adapter-utils/src/test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const itLinuxSandbox = isLinuxSandboxHost ? it : it.skip;
+
+itLinuxSandbox.each([
   ["0.12.0", "oneshot"],
   ["0.12.0", "persistent"],
   ["0.13.1", "oneshot"],
@@ -84,7 +91,7 @@ it.each([
   expect(logs).toContain(title);
 });
 
-it.each([
+itLinuxSandbox.each([
   ["0.12.0", "oneshot"],
   ["0.12.0", "persistent"],
   ["0.13.1", "oneshot"],
@@ -129,7 +136,7 @@ it("classifies quota without a reset time for the existing recovery backoff", as
   expect(result.retryNotBefore).toBeUndefined();
 });
 
-it.each([
+itLinuxSandbox.each([
   ["0.12.0", "oneshot"],
   ["0.12.0", "persistent"],
   ["0.13.1", "oneshot"],
@@ -154,7 +161,7 @@ it.each([
   expect(logs).toContain(title);
 });
 
-it.each([
+itLinuxSandbox.each([
   ["Context window limit exceeded", "limit"],
   ["Maximum number of turns reached", "limit"],
   ["Configured budget limit reached", "limit"],

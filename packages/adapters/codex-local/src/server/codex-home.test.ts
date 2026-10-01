@@ -15,6 +15,13 @@ import {
   stageCodexHomeForSync,
   writeManagedCodexMcpConfig,
 } from "./codex-home.js";
+import { isLinuxSandboxHost } from "@paperclipai/adapter-utils/test-support/linux-sandbox-gate";
+
+
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See adapter-utils/src/test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
 
 describe("mergeManagedCodexMcpGateways", () => {
   it("keeps runtime gateways and appends non-overlapping context gateways", () => {
@@ -1033,7 +1040,11 @@ describe("evaluateCodexCredentialReadiness", () => {
     }
   });
 
-  it("restricts permissions on an existing managed MCP config", async () => {
+  // POSIX permission bits are not meaningful on Windows: `chmod` there only
+  // toggles the read-only attribute, so every file reports 0o666 and asserting
+  // 0o600 would fail regardless of what the code did. The production code still
+  // sets the modes; this host simply cannot observe them.
+  it.skipIf(process.platform === "win32")("restricts permissions on an existing managed MCP config", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-mcp-config-"));
     try {
       const configPath = path.join(root, "config.toml");
@@ -1052,7 +1063,7 @@ describe("evaluateCodexCredentialReadiness", () => {
   });
 });
 
-describe("stageCodexHomeForSync", () => {
+describeLinuxSandbox("stageCodexHomeForSync", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });

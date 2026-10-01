@@ -76,7 +76,10 @@ describe("device-login credential export", () => {
     expect(a).not.toBe(resolveManagedCodexHomeDir(env, COMPANY));
   });
 
-  it("export_creates_root_and_home_at_mode_0700", async () => {
+  // Windows cannot express POSIX permission bits, so `stat().mode & 0o777` is
+  // always 0o666 there. The export still creates the root and home; only the
+  // 0700 assertion is unobservable on this host.
+  it.skipIf(process.platform === "win32")("export_creates_root_and_home_at_mode_0700", async () => {
     const home = await makeInstanceRoot();
     const env = envFor(home);
     const proofHome = deriveProofHome({ env, companyId: COMPANY, runId: RUN });
@@ -92,7 +95,9 @@ describe("device-login credential export", () => {
     expect((await stat(proofHome)).mode & 0o777).toBe(0o700);
   });
 
-  it("export_seeds_empty_proof_home_with_mode_0600", async () => {
+  // See the sibling 0700 test: Windows reports 0o666 for every file, so the 0600
+  // seed mode cannot be asserted here.
+  it.skipIf(process.platform === "win32")("export_seeds_empty_proof_home_with_mode_0600", async () => {
     const home = await makeInstanceRoot();
     const env = envFor(home);
     const proofHome = deriveProofHome({ env, companyId: COMPANY, runId: RUN });

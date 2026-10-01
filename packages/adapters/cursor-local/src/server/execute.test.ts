@@ -7,6 +7,8 @@ import { runChildProcess } from "@paperclipai/adapter-utils/server-utils";
 import { SANDBOX_INSTALL_COMMAND } from "../index.js";
 import { execute } from "./execute.js";
 import { createPromptContextFixture } from "@paperclipai/adapter-utils/test-fixtures/prompt-context";
+import { isLinuxSandboxHost } from "@paperclipai/adapter-utils/test-support/linux-sandbox-gate";
+
 
 type PrepareCursorSandboxCommandInput = {
   runId: string;
@@ -137,7 +139,12 @@ function createFreshLeaseSandboxRunner(options: {
   };
 }
 
-describe("cursor execute", () => {
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See adapter-utils/src/test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
+describeLinuxSandbox("cursor execute", () => {
   it.each([
     { detail: "Authentication failed", structured: "", expected: "Authentication failed" },
     { detail: "", structured: "", expected: "Cursor exited with code 7" },

@@ -238,7 +238,11 @@ describe("grok device-login credential promotion", () => {
     await expect(lstat(companyHomeAuthPath(env, COMPANY_A))).rejects.toThrow();
   });
 
-  it("creates the company Grok home at mode 0700 and writes auth.json at exact mode 0600", async () => {
+// Windows cannot express POSIX permission bits: chmod only toggles read-only, so
+  // every file reports 0o666 and a chmod-induced EACCES/EPERM never happens.
+  // These cases assert exactly that, so they are unobservable on this host.
+
+  it.skipIf(process.platform === "win32")("creates the company Grok home at mode 0700 and writes auth.json at exact mode 0600", async () => {
     const home = await makeInstanceRoot();
     const env = envFor(home);
     const outcome = await promoteGrokDeviceLoginCredential({
@@ -262,7 +266,11 @@ describe("grok device-login credential promotion", () => {
     expect(Object.keys(written)).toEqual([`${ISSUER}::${UUID_A}`]);
   });
 
-  it("normalizes the company Grok home to mode 0700 when the home already exists at a broader mode", async () => {
+// Windows cannot express POSIX permission bits: chmod only toggles read-only, so
+  // every file reports 0o666 and a chmod-induced EACCES/EPERM never happens.
+  // These cases assert exactly that, so they are unobservable on this host.
+
+  it.skipIf(process.platform === "win32")("normalizes the company Grok home to mode 0700 when the home already exists at a broader mode", async () => {
     const home = await makeInstanceRoot();
     const env = envFor(home);
     const companyHome = resolveManagedGrokHomeDir(env, COMPANY_A);

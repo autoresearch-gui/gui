@@ -4,6 +4,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { runChildProcess } from "@paperclipai/adapter-utils/server-utils";
 import { prepareCursorSandboxCommand } from "./remote-command.js";
+import { isLinuxSandboxHost } from "@paperclipai/adapter-utils/test-support/linux-sandbox-gate";
+
 
 function createLocalSandboxRunner() {
   let counter = 0;
@@ -43,7 +45,12 @@ printf '%s\\n' ok
   await fs.chmod(commandPath, 0o755);
 }
 
-describe("prepareCursorSandboxCommand", () => {
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See adapter-utils/src/test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
+describeLinuxSandbox("prepareCursorSandboxCommand", () => {
   it("prefers the Cursor installer bin directory when the default agent entrypoint is installed there", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-cursor-remote-command-cursor-bin-"));
     const systemHomeDir = path.join(root, "system-home");

@@ -5,6 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
+import { isLinuxSandboxHost } from "@paperclipai/adapter-utils/test-support/linux-sandbox-gate";
+
 
 import {
   prepareSandboxManagedRuntime,
@@ -15,7 +17,12 @@ import { buildCodexAuthInboundProvision } from "./codex-auth-merge-scripts.js";
 
 const execFile = promisify(execFileCallback);
 
-describe("codex home auth merge on sandbox asset extract", () => {
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See adapter-utils/src/test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
+describeLinuxSandbox("codex home auth merge on sandbox asset extract", () => {
   const cleanupDirs: string[] = [];
 
   afterEach(async () => {

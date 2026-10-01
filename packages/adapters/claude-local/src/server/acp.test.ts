@@ -5,6 +5,8 @@ import { createPromptContextFixture } from "@paperclipai/adapter-utils/test-fixt
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AdapterExecutionContext, AdapterInvocationMeta } from "@paperclipai/adapter-utils";
 import { runChildProcess } from "@paperclipai/adapter-utils/server-utils";
+import { isLinuxSandboxHost } from "@paperclipai/adapter-utils/test-support/linux-sandbox-gate";
+
 
 // Wrap the shared staging seam in a call-recording spy that still delegates to
 // the real implementation (a runner-backed sandbox test exercises it end to
@@ -267,7 +269,12 @@ function buildContext(root: string, overrides: Partial<AdapterExecutionContext> 
   };
 }
 
-describe("claude_local ACP lane", () => {
+// The local sandbox transport is Linux-only: it hands POSIX shell scripts to `sh`
+// (`rm -rf`, `xargs`, `tar`, `chmod`), so these suites cannot run on Windows or macOS.
+// See adapter-utils/src/test-support/linux-sandbox-gate.ts. CI runs them on Linux.
+const describeLinuxSandbox = isLinuxSandboxHost ? describe : describe.skip;
+
+describeLinuxSandbox("claude_local ACP lane", () => {
   it("uses the same default model in ACP startup and session identity", async () => {
     const root = await makeTempRoot("paperclip-claude-acp-default-");
     const meta: AdapterInvocationMeta[] = [];
