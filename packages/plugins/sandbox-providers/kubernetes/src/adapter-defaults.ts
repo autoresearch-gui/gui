@@ -36,8 +36,13 @@ const REGISTRY: Record<string, AdapterDefaults> = {
   },
   opencode_local: {
     runtimeImage: "ghcr.io/paperclipai/agent-runtime-opencode:v1",
+    // No OPENCODE_API_KEY: the default model is OpenCode Zen's
+    // `space-bunny-free`, which answers unauthenticated. The key below is only
+    // for an operator who deliberately routes to a Zen model that needs one.
     envKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"],
-    allowFqdns: ["api.anthropic.com", "api.openai.com", "openrouter.ai"],
+    // opencode.ai serves the Zen provider (`/zen/v1`), which is the default model
+    // host. Without it a sandboxed agent gets no usable model at all.
+    allowFqdns: ["api.anthropic.com", "api.openai.com", "openrouter.ai", "opencode.ai"],
     probeCommand: ["opencode", "--version"],
   },
   pi_local: {

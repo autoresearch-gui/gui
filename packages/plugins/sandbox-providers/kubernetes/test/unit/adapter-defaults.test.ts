@@ -24,6 +24,16 @@ describe("adapter-defaults (built-in)", () => {
     expect(d.probeCommand).toEqual(["codex", "--version"]);
   });
 
+  it("allows opencode.ai egress, because that hosts the credential-free default model", () => {
+    const d = getAdapterDefaults("opencode_local");
+    // The default opencode_local model is OpenCode Zen's space-bunny-free, served
+    // from opencode.ai/zen/v1. Without this host a sandboxed agent has no usable
+    // model at all, and the failure only shows up at run time inside the pod.
+    expect(d.allowFqdns).toContain("opencode.ai");
+    // Still no Zen credential is required to reach it.
+    expect(d.envKeys).not.toContain("OPENCODE_API_KEY");
+  });
+
   it("throws on unknown adapter type", () => {
     expect(() => getAdapterDefaults("nonexistent_local")).toThrow(/unknown adapter type/i);
   });

@@ -42,7 +42,18 @@ export const SANDBOX_INSTALL_COMMAND =
   'fi; ' +
   'fi';
 
-export const DEFAULT_OPENCODE_LOCAL_MODEL = "openai/gpt-5.2-codex";
+/**
+ * The model an `opencode_local` agent gets when none is chosen.
+ *
+ * `opencode/space-bunny-free` (OpenCode Zen) rather than a hosted frontier model
+ * on purpose: it is the only model in this catalog that needs no credential. Every
+ * other entry routes to a provider that fails immediately without an API key, so
+ * defaulting to one of those makes the adapter look broken on a fresh install
+ * where the operator has set up nothing yet. Zen answers unauthenticated, so the
+ * adapter works out of the box and the operator can attach a credential-bearing
+ * model later if they want one.
+ */
+export const DEFAULT_OPENCODE_LOCAL_MODEL = "opencode/space-bunny-free";
 
 export function isValidOpenCodeModelId(value: unknown): value is string {
   if (typeof value !== "string") return false;
@@ -52,7 +63,12 @@ export function isValidOpenCodeModelId(value: unknown): value is string {
 }
 
 export const models: Array<{ id: string; label: string }> = [
-  { id: DEFAULT_OPENCODE_LOCAL_MODEL, label: DEFAULT_OPENCODE_LOCAL_MODEL },
+  // First entry is the default; the label says why it is worth picking, because
+  // "no API key required" is the whole reason it leads the list.
+  {
+    id: DEFAULT_OPENCODE_LOCAL_MODEL,
+    label: "Space Bunny Free (OpenCode Zen, no API key required)",
+  },
   { id: "openai/gpt-6-astra", label: "openai/gpt-6-astra" },
   { id: "openai/gpt-6-sol", label: "openai/gpt-6-sol" },
   { id: "openai/gpt-6-luna", label: "openai/gpt-6-luna" },
@@ -106,6 +122,10 @@ Notes:
 - OpenCode supports multiple providers and models. Use \
   \`opencode models\` to list available options in provider/model format.
 - Paperclip requires an explicit \`model\` value for \`opencode_local\` agents.
+- The default model is \`opencode/space-bunny-free\` (OpenCode Zen), which needs no \
+  API key and works on a fresh install with no credentials configured. Every other \
+  model in the catalog routes to a provider that fails without a credential, so \
+  pick one only after the operator has configured its API key.
 - Runs are executed with: opencode run --format json ...
 - Sessions are resumed with --session when stored session cwd matches current cwd.
 - The adapter sets OPENCODE_DISABLE_PROJECT_CONFIG=true to prevent OpenCode from \
