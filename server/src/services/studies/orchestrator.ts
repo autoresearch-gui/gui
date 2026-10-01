@@ -52,11 +52,18 @@ export interface PulseResult {
 export interface OrchestratorDeps {
   /** Number of ideas that should be open before the arena asks for more. */
   minOpenIdeas?: number;
-  /** Creates the issue that wakes one proposer. Injected so tests need no agents. */
+  /**
+   * Asks proposers for more ideas. Injected so tests need no agents.
+   *
+   * Carries the counts the pulse already computed, so the caller can decide how
+   * many to ask without repeating the query.
+   */
   requestIdeaProposals?: (input: {
     companyId: string;
     studyId: string;
     count: number;
+    openIdeas: number;
+    minOpenIdeas: number;
   }) => Promise<number>;
   now?: () => Date;
 }
@@ -244,6 +251,8 @@ export function studyOrchestrator(db: Db, deps: OrchestratorDeps = {}) {
         companyId: input.companyId,
         studyId: study.id,
         count: minOpenIdeas - openIdeas,
+        openIdeas,
+        minOpenIdeas,
       });
       steps.push({
         name: "replenish_arena",

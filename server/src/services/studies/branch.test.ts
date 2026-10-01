@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { applyBranchAction, commitExperimentPatch, runGit, type GitRunner } from "./branch.js";
+import { applyBranchAction, commitExperimentPatch, ensureStudyBranch, runGit, type GitRunner } from "./branch.js";
 
 /**
  * Branch transitions against a real repository.
@@ -262,5 +262,100 @@ describe("commitExperimentPatch", () => {
     });
 
     expect(result.applied).toBe(true);
+  });
+});
+
+describe("ensureStudyBranch", () => {
+  async function bareRepo(): Promise<{ dir: string; git: GitRunner }> {
+    const dir = await mkdtemp(path.join(tmpdir(), "autoresearch-branch-"));
+    roots.push(dir);
+    const git: GitRunner = async (cwd, args) => runGit(cwd, args);
+    const init = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+    init("init", "-b", "main");
+    init("config", "user.email", "test@example.com");
+    init("config", "user.name", "Test");
+    init("config", "commit.gpgsign", "false");
+    await writeFile(path.join(dir, "train.py"), "VAL = 1.0\n", "utf8");
+    init("add", "-A");
+    init("commit", "--no-gpg-sign", "-m", "baseline");
+    return { dir, git };
+  }
+
+  it("creates the study branch from the base ref when it is absent", async () => {
+    const repo = await bareRepo();
+    const baseSha = await headOf(repo.dir);
+
+    const result = await ensureStudyBranch(repo.git, {
+      repoPath: repo.dir,
+      branchName: "autoresearch/mar5",
+      baseRef: "main",
+    });
+
+    expect(result.created).toBe(true);
+    expect(result.head).toBe(baseSha);
+    const { stdout } = await repo.git(repo.dir, [
+      "rev-parse",
+      "refs/heads/autoresearch/mar5",
+    ]);
+    expect(stdout.trim()).toBe(baseSha);
+  });
+
+  it("creates the branch without checking it out", async () => {
+    // The repo is the operator's own checkout. Switching its branch as a side
+    // effect of starting a study would be a surprising, hard-to-diagnose move.
+    const repo = await bareRepo();
+    const before = await repo.git(repo.dir, ["symbolic-ref", "--short", "HEAD"]);
+
+    await ensureStudyBranch(repo.git, {
+      repoPath: repo.dir,
+      branchName: "autoresearch/mar5",
+      baseRef: "main",
+    });
+
+    const after = await repo.git(repo.dir, ["symbolic-ref", "--short", "HEAD"]);
+    expect(after.stdout.trim()).toBe("main");
+    expect(after.stdout.trim()).toBe(before.stdout.trim());
+  });
+
+  it("is idempotent and never moves an existing branch", async () => {
+    const repo = await bareRepo();
+    await ensureStudyBranch(repo.git, {
+      repoPath: repo.dir,
+      branchName: "autoresearch/mar5",
+      baseRef: "main",
+    });
+
+    // Move it somewhere else, then call again. If this reset or recreated the
+    // branch it would silently discard a committed experiment.
+    await repo.git(repo.dir, ["checkout", "autoresearch/mar5"]);
+    await writeFile(path.join(repo.dir, "train.py"), "VAL = 0.5\n", "utf8");
+    execFileSync("git", ["add", "-A"], { cwd: repo.dir, stdio: "ignore" });
+    execFileSync("git", ["commit", "--no-gpg-sign", "-m", "experiment"], {
+      cwd: repo.dir,
+      stdio: "ignore",
+    });
+    const advanced = await headOf(repo.dir);
+    await repo.git(repo.dir, ["checkout", "main"]);
+
+    const second = await ensureStudyBranch(repo.git, {
+      repoPath: repo.dir,
+      branchName: "autoresearch/mar5",
+      baseRef: "main",
+    });
+
+    expect(second.created).toBe(false);
+    expect(second.head).toBe(advanced);
+    expect(advanced).not.toBe(await headOf(repo.dir));
+  });
+
+  it("fails loudly when the base ref cannot be resolved", async () => {
+    const repo = await bareRepo();
+    await expect(
+      ensureStudyBranch(repo.git, {
+        repoPath: repo.dir,
+        branchName: "autoresearch/mar5",
+        baseRef: "no-such-ref",
+      }),
+    ).rejects.toThrow(/no-such-ref/);
   });
 });

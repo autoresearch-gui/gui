@@ -10160,17 +10160,48 @@ export function heartbeatService(
     outcome: RunSessionOutcome;
     error: string | null;
   }) {
+    // Two links, in order of directness. `experiments.heartbeatRunId` is an
+    // explicit pointer written by whoever started the run. The issue join covers
+    // the normal dispatch path, where the scheduler created the issue and the
+    // heartbeat owns `issues.executionRunId`, so the run is already identifiable
+    // without every run-creation path having to know about experiments.
     const experiment = await db
       .select({ id: experiments.id, studyId: experiments.studyId })
       .from(experiments)
       .where(
         and(
           eq(experiments.companyId, input.run.companyId),
-          eq(experiments.heartbeatRunId, input.run.id),
+          or(
+            eq(experiments.heartbeatRunId, input.run.id),
+            exists(
+              db
+                .select({ one: sql`1` })
+                .from(issues)
+                .where(
+                  and(
+                    eq(issues.id, experiments.issueId),
+                    eq(issues.executionRunId, input.run.id),
+                  ),
+                ),
+            ),
+          ),
         ),
       )
+      .orderBy(experiments.sequence)
       .then((rows) => rows[0] ?? null);
     if (!experiment) return null;
+
+    // Backfill the explicit pointer so later settlements skip the join. The
+    // experiments table has no `updated_at`, so this writes only the pointer.
+    await db
+      .update(experiments)
+      .set({ heartbeatRunId: input.run.id })
+      .where(
+        and(
+          eq(experiments.companyId, input.run.companyId),
+          eq(experiments.id, experiment.id),
+        ),
+      );
 
     // A cancelled, interrupted, or timed-out run produced no metric, so it settles as a crash
     // rather than a discard: the executor never reached a verdict, and the distinction the

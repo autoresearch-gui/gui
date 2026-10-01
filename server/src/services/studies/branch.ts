@@ -52,6 +52,72 @@ export interface BranchApplyResult {
   detail: string;
 }
 
+export interface EnsureBranchResult {
+  created: boolean;
+  head: string | null;
+  detail: string;
+}
+
+/**
+ * Creates the study branch if it does not exist yet.
+ *
+ * Needed because of a genuine tension between two existing contracts. Study setup
+ * asserts the branch is *absent*, so an operator is never silently adopting a
+ * branch with history on it. But the dispatch issue pins that branch with
+ * `existingBranch`, and exact-branch realization fails closed if the branch does
+ * not already exist - it never creates one, because renaming or creating would
+ * defeat the point of pinning an exact branch.
+ *
+ * So the framework creates the branch itself, at dispatch time, from `baseRef`.
+ * That keeps both invariants: a study still never adopts pre-existing history,
+ * and the pinned workspace can still attach. Idempotent, because several
+ * experiments can race for the same first branch.
+ *
+ * Never called with a branch that setup already vouched for, and never moves an
+ * existing branch: if it is already there, this is a no-op.
+ */
+export async function ensureStudyBranch(
+  git: GitRunner,
+  input: { repoPath: string; branchName: string; baseRef: string },
+): Promise<EnsureBranchResult> {
+  const exists = await git(input.repoPath, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `refs/heads/${input.branchName}`,
+  ])
+    .then(() => true)
+    .catch(() => false);
+
+  if (exists) {
+    // The branch's own head, not the repository's HEAD: the operator's checkout
+    // is on some other branch, and reporting that would look like the study
+    // branch had been reset.
+    const head = await git(input.repoPath, ["rev-parse", `refs/heads/${input.branchName}`])
+      .then((r) => r.stdout.trim() || null)
+      .catch(() => null);
+    return {
+      created: false,
+      head,
+      detail: `${input.branchName} already exists`,
+    };
+  }
+
+  // `branch <name> <baseRef>` creates the branch without checking it out, which
+  // matters: the repo is the operator's own checkout and must stay on whatever
+  // they left it on.
+  await git(input.repoPath, ["branch", input.branchName, input.baseRef]);
+  const head = await git(input.repoPath, ["rev-parse", `refs/heads/${input.branchName}`])
+    .then((r) => r.stdout.trim() || null)
+    .catch(() => null);
+
+  return {
+    created: true,
+    head,
+    detail: `created ${input.branchName} at ${input.baseRef}`,
+  };
+}
+
 async function currentHead(git: GitRunner, cwd: string): Promise<string | null> {
   try {
     const { stdout } = await git(cwd, ["rev-parse", "HEAD"]);

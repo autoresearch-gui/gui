@@ -2038,6 +2038,13 @@
       "when": 1790808509025,
       "tag": "0292_crazy_aqueduct",
       "breakpoints": true
+    },
+    {
+      "idx": 293,
+      "version": "7",
+      "when": 1790816828259,
+      "tag": "0293_friendly_red_wolf",
+      "breakpoints": true
     }
   ]
 }

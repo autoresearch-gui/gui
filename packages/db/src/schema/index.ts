@@ -215,4 +215,10 @@ export { chatTaskHandoffs, chatCompletionDeliveries } from "./chat_completion_de
 
 export { agentInstructionRevisions, agentInstructionHeads, agentInstructionWorkingCopies } from "./agent_instruction_revisions.js";
 
-export { studies, experimentIdeas, experiments, experimentVerdicts } from "./studies.js";
+export {
+  studies,
+  studyProposers,
+  experimentIdeas,
+  experiments,
+  experimentVerdicts,
+} from "./studies.js";

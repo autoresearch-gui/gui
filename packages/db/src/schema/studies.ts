@@ -96,6 +96,19 @@ export const studies = pgTable(
      * machine loop the same run all night.
      */
     maxTransientRetries: integer("max_transient_retries").notNull().default(3),
+    /**
+     * The agent that executes training runs. It runs the `process` adapter with
+     * no language model in the loop, so a training run costs nothing in tokens
+     * and behaves identically every time.
+     */
+    executorAgentId: uuid("executor_agent_id").references(() => agents.id, { onDelete: "set null" }),
+    /**
+     * How often the scheduler may run this study's pulse. The pulse is a
+     * liveness check as much as a driver of progress, so it wants to run often,
+     * but it must not do real work more than once per experiment.
+     */
+    pulseIntervalSec: integer("pulse_interval_sec").notNull().default(120),
+    lastPulseAt: timestamp("last_pulse_at", { withTimezone: true }),
     maxSimplificationKeepsPerWindow: integer("max_simplification_keeps_per_window").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
@@ -278,5 +291,45 @@ export const experimentVerdicts = pgTable(
   (table) => ({
     studyCreatedIdx: index("experiment_verdicts_study_created_idx").on(table.studyId, table.createdAt),
     experimentIdx: index("experiment_verdicts_experiment_idx").on(table.experimentId),
+  }),
+);
+
+/**
+ * The agents that propose ideas for a study.
+ *
+ * A roster rather than a list on the study row, because the interesting question
+ * is per-agent: who is idle, who has already been asked this cycle, and who keeps
+ * proposing the same thing. `lastProposalAt` is what lets the pulse ask the
+ * *least recently asked* proposer rather than always the first one, which is what
+ * keeps a single prolific agent from monopolising the arena.
+ */
+export const studyProposers = pgTable(
+  "study_proposers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    studyId: uuid("study_id")
+      .notNull()
+      .references(() => studies.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    /** Paused proposers keep their history but stop being asked. */
+    active: boolean("active").notNull().default(true),
+    lastProposalAt: timestamp("last_proposal_at", { withTimezone: true }),
+    proposalCount: integer("proposal_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    studyAgentUq: uniqueIndex("study_proposers_study_agent_uq").on(table.studyId, table.agentId),
+    studyActiveIdx: index("study_proposers_study_active_idx").on(table.studyId, table.active),
+    // The pulse picks the least recently asked active proposer.
+    studyLastAskedIdx: index("study_proposers_study_last_asked_idx").on(
+      table.studyId,
+      table.lastProposalAt,
+    ),
   }),
 );

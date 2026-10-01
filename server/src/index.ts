@@ -87,6 +87,8 @@ import {
   workspaceOperationService,
 } from "./services/index.js";
 import { questionResponseDeliveryService } from "./services/question-response-delivery.js";
+import { studyDispatcher } from "./services/studies/dispatch.js";
+import { studyScheduler } from "./services/studies/scheduler.js";
 import { deliverNativeQuestionResponse } from "./services/native-runtime/native-question-bridge.js";
 import { queueIssueAssignmentWakeup } from "./services/issue-assignment-wakeup.js";
 import { createSecretProposalsService } from "./services/secret-proposals.js";
@@ -1319,6 +1321,16 @@ async function startServerWithDatabaseTeardown(
     const environmentCustomImages = environmentCustomImageService(db as any, { pluginWorkerManager });
     const routines = routineService(db as any, { pluginWorkerManager });
     const statusCards = statusCardService(db as any);
+    // The autoresearch study loop. Deterministic and server-side on purpose: the
+    // pulse decides when a training run starts and when a verdict applies, and
+    // putting a language model in that path would mean paying for a token to
+    // decide something a database constraint already decides. The language models
+    // are the idea-proposer agents, dispatched from here as issues.
+    const studyDispatch = studyDispatcher(db as any, { wakeup: heartbeat.wakeup });
+    const studies = studyScheduler(db as any, {
+      dispatchExperiment: studyDispatch.dispatchExperiment,
+      requestProposal: studyDispatch.requestProposal,
+    });
     const issues = issueService(db as any);
     const mergedPullRequestConfirmations = issueThreadInteractionService(db as any, {
       wakeup: heartbeat.wakeup,
@@ -1691,6 +1703,22 @@ async function startServerWithDatabaseTeardown(
           })
           .catch((err) => {
             logger.error({ err }, "routine scheduler tick failed");
+          }));
+
+        // Autoresearch studies. Same beat as the other deterministic sweeps, so
+        // the existing suppression already covers a study: task drain, database
+        // restore, and worktree-instance startup all stop the loop rather than
+        // letting it fight a half-started environment.
+        if (heartbeatSchedulerStopped) return;
+        trackHeartbeatSchedulerWork(studies
+          .tickStudies(new Date())
+          .then((result) => {
+            if (result.dispatched > 0 || result.requested > 0 || result.stopped.length > 0) {
+              logger.info({ ...result }, "study scheduler tick");
+            }
+          })
+          .catch((err) => {
+            logger.error({ err }, "study scheduler tick failed");
           }));
 
         if (heartbeatSchedulerStopped) return;

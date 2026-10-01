@@ -353,6 +353,24 @@ export const TASK_WATCHDOG_PRODUCT_BUG_ORIGIN_KIND = "task_watchdog_product_bug"
 // (e.g. suppress the seeded-description bubble and rely on a seeded greeting).
 export const ONBOARDING_FIRST_TASK_ORIGIN_KIND = "onboarding_first_task";
 
+/**
+ * The issue that dispatches one autoresearch training run.
+ *
+ * `originId` carries the experiment id, which is what makes dispatch idempotent:
+ * a pulse that fires twice finds the open issue for that experiment and does not
+ * create a second one, so a run can never be dispatched to the GPU twice.
+ */
+export const STUDY_EXPERIMENT_ORIGIN_KIND = "study_experiment";
+
+/**
+ * The issue that asks one idea-proposer for a hypothesis.
+ *
+ * Same idempotency story keyed on the study, with the proposer agent on the
+ * assignee. Proposer threads are long-lived conversations rather than one task
+ * per idea, so the pulse re-wakes the same issue rather than opening a new one.
+ */
+export const STUDY_IDEA_PROPOSAL_ORIGIN_KIND = "study_idea_proposal";
+
 export const ISSUE_ORIGIN_KINDS = [
   "manual",
   "routine_execution",
@@ -365,6 +383,8 @@ export const ISSUE_ORIGIN_KINDS = [
   TASK_WATCHDOG_PRODUCT_BUG_ORIGIN_KIND,
   ONBOARDING_FIRST_TASK_ORIGIN_KIND,
   "chat_channel",
+  STUDY_EXPERIMENT_ORIGIN_KIND,
+  STUDY_IDEA_PROPOSAL_ORIGIN_KIND,
 ] as const;
 export type BuiltInIssueOriginKind = (typeof ISSUE_ORIGIN_KINDS)[number];
 export type PluginIssueOriginKind = `plugin:${string}`;
