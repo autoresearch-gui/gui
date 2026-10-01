@@ -47,6 +47,7 @@ import {
   DEFAULT_PAPERCLIP_CONVERSATION_PROMPT_TEMPLATE,
   runChildProcess,
   isPaperclipSkillSourceMissing,
+  linkSkillDirectory,
   readPaperclipRuntimeSkillEntries,
   readPaperclipIssueWorkModeFromContext,
   resolveLegacyPaperclipDesiredSkillNames,
@@ -216,7 +217,11 @@ async function buildOpenCodeSkillsDir(config: Record<string, unknown>): Promise<
   for (const entry of availableEntries) {
     if (!desiredNames.has(entry.key)) continue;
     if (isPaperclipSkillSourceMissing(entry)) continue;
-    await fs.symlink(entry.source, path.join(target, entry.runtimeName));
+    // linkSkillDirectory, not a bare fs.symlink: a Windows symlink needs
+    // Administrator or Developer Mode and fails EPERM on a stock host, which
+    // aborted the whole run. A junction needs neither, and the helper still
+    // falls back to a copy if that is refused too.
+    await linkSkillDirectory(entry.source, path.join(target, entry.runtimeName));
   }
   return target;
 }

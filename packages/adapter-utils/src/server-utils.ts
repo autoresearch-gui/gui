@@ -4351,13 +4351,62 @@ export function writePaperclipSkillSyncPreference(
   return next;
 }
 
+/**
+ * Normalizes a path for comparison against another path.
+ *
+ * `fs.readlink` on a Windows junction returns the substituted target, which
+ * Windows hands back in extended-length form (`\\?\C:\...`). Comparing that to a
+ * plain `C:\...` source always differs, so the link would look stale and be
+ * "repaired" on every single run. Stripping the prefix is what makes the
+ * already-correct-link check work.
+ */
+function normalizeLinkedPath(value: string): string {
+  const withoutPrefix = value.startsWith("\\\\?\\") ? value.slice(4) : value;
+  return path.resolve(withoutPrefix);
+}
+
+/**
+ * Links a skill directory into a runtime's skills home.
+ *
+ * A bare `fs.symlink` on Windows needs either Administrator or Developer Mode and
+ * fails `EPERM` on a stock host, which made every local adapter's skill injection
+ * fail there. A junction needs neither and is transparent to readers, so it is the
+ * right link type for a directory on that platform. Node ignores the type argument
+ * everywhere else, so one call is correct on every OS.
+ *
+ * Falls back to a recursive copy when even the junction is refused: a copied
+ * skill behaves the same for the runtime, and refusing outright would abandon an
+ * otherwise-healthy run over a filesystem nicety. The copy is reported so callers
+ * can surface that the link is not live.
+ */
+export async function linkSkillDirectory(
+  source: string,
+  target: string,
+): Promise<"linked" | "copied"> {
+  // A junction must name an absolute target, and resolving also makes the
+  // later readlink comparison well-defined.
+  const absoluteSource = path.resolve(source);
+  try {
+    await fs.symlink(absoluteSource, target, "junction");
+    return "linked";
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    // EEXIST is handled by the caller's lstat, so treat it as "not linked" too.
+    if (code !== "EPERM" && code !== "EACCES" && code !== "ENOSYS" && code !== "EEXIST") {
+      throw err;
+    }
+  }
+  await fs.cp(absoluteSource, target, { recursive: true, force: true });
+  return "copied";
+}
+
 export async function ensurePaperclipSkillSymlink(
   source: string,
   target: string,
-  linkSkill: (source: string, target: string) => Promise<void> = (
-    linkSource,
-    linkTarget,
-  ) => fs.symlink(linkSource, linkTarget),
+  // `Promise<unknown>` rather than `Promise<void>`: the default reports whether it
+  // linked or copied, and existing callers/tests pass void-returning thunks. The
+  // return value is ignored here, so widening keeps both working.
+  linkSkill: (source: string, target: string) => Promise<unknown> = linkSkillDirectory,
 ): Promise<"created" | "repaired" | "skipped"> {
   const existing = await fs.lstat(target).catch(() => null);
   if (!existing) {
@@ -4365,6 +4414,8 @@ export async function ensurePaperclipSkillSymlink(
     return "created";
   }
 
+  // A junction reports as a symbolic link here, so both are handled by the
+  // same repair path.
   if (!existing.isSymbolicLink()) {
     return "skipped";
   }
@@ -4372,8 +4423,10 @@ export async function ensurePaperclipSkillSymlink(
   const linkedPath = await fs.readlink(target).catch(() => null);
   if (!linkedPath) return "skipped";
 
-  const resolvedLinkedPath = path.resolve(path.dirname(target), linkedPath);
-  if (resolvedLinkedPath === source) {
+  const resolvedLinkedPath = normalizeLinkedPath(
+    path.isAbsolute(linkedPath) ? linkedPath : path.resolve(path.dirname(target), linkedPath),
+  );
+  if (resolvedLinkedPath === normalizeLinkedPath(source)) {
     return "skipped";
   }
 

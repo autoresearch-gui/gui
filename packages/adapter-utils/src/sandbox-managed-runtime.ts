@@ -517,21 +517,60 @@ export interface SandboxManagedRuntimeClient {
  * authors every `targetPath`, but the native transport crosses the host↔sandbox
  * trust boundary, so we canonicalize and confine each mapping's source and target
  * to an orchestrator-owned root before handing the operation to a provider.
- * Absolute escapes and `..` traversal are rejected fail-closed. Sandbox and host
- * paths on the server are POSIX.
+ * Absolute escapes and `..` traversal are rejected fail-closed.
+ *
+ * The two sides can be different path flavours, and which one a given path uses
+ * is derived from the path itself rather than assumed:
+ *
+ * - A real sandbox is a Linux container, so its side is POSIX (`/workspace/...`).
+ * - The host side is whatever the server runs on, so a Windows host yields
+ *   `F:\...`.
+ * - In-process transports (and their tests) legitimately use host paths on both
+ *   sides.
+ *
+ * The flavour is taken from the candidate and then applied to the roots, so the
+ * containment test always compares like with like. Traversal is still rejected
+ * fail-closed in either flavour.
  */
 export function assertSyncOperationsConfined(
   operations: SandboxSyncOperation[],
   roots: { sourceRoots: string[]; targetRoots: string[] },
 ): void {
-  const confine = (candidate: string, allowed: string[], label: string): void => {
-    const normalized = path.posix.normalize(candidate);
-    if (!path.posix.isAbsolute(normalized) || normalized === ".." || normalized.includes("/../") || normalized.endsWith("/..")) {
+  /**
+   * Windows drive-letter and UNC-looking paths are unambiguous; everything else
+   * is treated as POSIX. `path.win32.isAbsolute` also accepts `/foo`, so the
+   * drive/UNC shape is what actually decides.
+   */
+  const flavourFor = (candidate: string): path.PlatformPath =>
+    /^[A-Za-z]:[\\/]/.test(candidate) || candidate.startsWith("\\\\")
+      ? path.win32
+      : path.posix;
+
+  const confine = (
+    candidate: string,
+    allowed: string[],
+    label: string,
+  ): void => {
+    const flavour = flavourFor(candidate);
+    const normalized = flavour.normalize(candidate);
+    const escaped =
+      normalized === ".." ||
+      normalized.includes(`${flavour.sep}..${flavour.sep}`) ||
+      normalized.endsWith(`${flavour.sep}..`) ||
+      (flavour === path.posix
+        ? // A POSIX-side path must not smuggle in a Windows separator.
+          normalized.includes("\\")
+        : // A bare drive root ("C:") is a relative path on that drive, not an
+          // absolute one, and must not pass as a confinement root.
+          normalized === "" || /^[A-Za-z]:$/.test(normalized));
+    if (!flavour.isAbsolute(normalized) || escaped) {
       throw new Error(`sync operation ${label} path is not a confined absolute path: ${candidate}`);
     }
     const within = allowed.some((root) => {
-      const normalizedRoot = path.posix.normalize(root);
-      const prefix = normalizedRoot.endsWith("/") ? normalizedRoot : `${normalizedRoot}/`;
+      const normalizedRoot = flavour.normalize(root);
+      const prefix = normalizedRoot.endsWith(flavour.sep)
+        ? normalizedRoot
+        : `${normalizedRoot}${flavour.sep}`;
       return normalized === normalizedRoot || normalized.startsWith(prefix);
     });
     if (!within) {

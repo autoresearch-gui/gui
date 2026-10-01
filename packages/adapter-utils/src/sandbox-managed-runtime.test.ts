@@ -2350,7 +2350,80 @@ describe("sandbox managed runtime", () => {
     ).toThrow(/escapes its confinement root|not a confined absolute path/);
   });
 
-  // Regression lock: a representative `codex_local` start stages its inbound bytes
+  describe("assertSyncOperationsConfined path flavours", () => {
+    const mapping = (sourcePath: string, targetPath: string) => ({
+      operationId: "op",
+      files: [{ sourcePath, targetPath }],
+    });
+
+    it("accepts Windows host sources under a Windows root", () => {
+      // Regression lock. The guard used to normalize with `path.posix` on the
+      // assumption that server paths are always POSIX, so on a Windows host every
+      // `C:\...`/`F:\...` source failed `posix.isAbsolute` and the entire native
+      // sync was refused before a byte moved.
+      expect(() =>
+        assertSyncOperationsConfined(
+          [mapping("C:\\work\\repo\\.git", "/remote/workspace/.paperclip-runtime/inbound.tar")],
+          { sourceRoots: ["C:\\work\\repo"], targetRoots: ["/remote/workspace"] },
+        ),
+      ).not.toThrow();
+    });
+
+    it("still confines a Windows source to its Windows root", () => {
+      // The flavour change must not weaken containment: a sibling path that merely
+      // shares a string prefix is still an escape.
+      expect(() =>
+        assertSyncOperationsConfined(
+          [mapping("C:\\work\\repo-evil\\secret", "/remote/workspace/x.tar")],
+          { sourceRoots: ["C:\\work\\repo"], targetRoots: ["/remote/workspace"] },
+        ),
+      ).toThrow(/escapes its confinement root/);
+    });
+
+    it("still rejects a Windows source that traverses out with ..", () => {
+      expect(() =>
+        assertSyncOperationsConfined(
+          [mapping("C:\\work\\repo\\..\\..\\secrets", "/remote/workspace/x.tar")],
+          { sourceRoots: ["C:\\work\\repo"], targetRoots: ["/remote/workspace"] },
+        ),
+      ).toThrow(/not a confined absolute path|escapes its confinement root/);
+    });
+
+    it("still confines a POSIX sandbox target to its POSIX root", () => {
+      expect(() =>
+        assertSyncOperationsConfined(
+          [mapping("C:\\work\\repo", "/etc/workspace-upload.tar")],
+          { sourceRoots: ["C:\\work\\repo"], targetRoots: ["/remote/workspace"] },
+        ),
+      ).toThrow(/escapes its confinement root/);
+    });
+
+    it("rejects a relative path in either flavour", () => {
+      expect(() =>
+        assertSyncOperationsConfined(
+          [mapping("repo/.git", "/remote/workspace/x.tar")],
+          { sourceRoots: ["C:\\work\\repo"], targetRoots: ["/remote/workspace"] },
+        ),
+      ).toThrow(/not a confined absolute path/);
+      expect(() =>
+        assertSyncOperationsConfined(
+          [mapping("C:\\work\\repo", "remote/workspace/x.tar")],
+          { sourceRoots: ["C:\\work\\repo"], targetRoots: ["/remote/workspace"] },
+        ),
+      ).toThrow(/not a confined absolute path/);
+    });
+
+    it("keeps POSIX and Windows sides in the same operation independent", () => {
+      // A Windows host staging into a Linux sandbox is the production shape: the
+      // two sides legitimately use different separators.
+      expect(() =>
+        assertSyncOperationsConfined(
+          [mapping("C:\\work\\repo\\.git", "/remote/workspace/.paperclip-runtime/inbound.tar")],
+          { sourceRoots: ["C:\\work\\repo"], targetRoots: ["/remote/workspace"] },
+        ),
+      ).not.toThrow();
+    });
+  });
   // as TWO `syncIn` operations. The git-history and workspace-overlay tars share
   // ONE merged operation (one native `uploadFiles` round-trip that carries both
   // tars, with the two extract commands as ordered `postUploadCommands`); the
